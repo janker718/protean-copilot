@@ -1,0 +1,129 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.intellij.platform' version '2.17.0'
+}
+
+// =============================================================================
+// 加载本地属性文件（不提交到 git）
+// =============================================================================
+def localPropertiesFile = rootProject.file('local.properties')
+def localProperties = new Properties()
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { localProperties.load(it) }
+    println 'Loaded local.properties'
+}
+
+ext.getLocalProperty = { String key, String defaultValue = null ->
+    return localProperties.getProperty(key) ?: project.findProperty(key) ?: defaultValue
+}
+
+group = 'com.protean.copilot'
+version = '0.1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
+}
+
+dependencies {
+    intellijPlatform {
+        intellijIdea '2025.2.6.1'
+    }
+    implementation 'com.google.code.gson:gson:2.10.1'
+}
+
+intellijPlatform {
+    pluginConfiguration {
+        ideaVersion {
+            sinceBuild = '252'
+        }
+        changeNotes = """
+            Initial Protean Copilot plugin skeleton.
+        """.stripIndent()
+    }
+}
+
+tasks.withType(JavaCompile) {
+}
+
+// =============================================================================
+// Webview 构建集成
+// 参照 jetbrains-cc-gui：在 Java 编译前通过 Vite 将 React 应用打包为单 HTML 文件
+// =============================================================================
+
+def webviewDir = file('webview')
+def requestedTasks = gradle.startParameter.taskNames.collect { it.toLowerCase() }
+def enableVConsoleInWebview = requestedTasks.any { it.contains('runide') }
+def skipWebviewBuild = (project.findProperty('skipWebview') ?: 'false').toString().toBoolean()
+
+tasks.register('buildWebview', Exec) {
+    workingDir webviewDir
+    environment 'VITE_ENABLE_VCONSOLE', enableVConsoleInWebview ? 'true' : 'false'
+
+    // 解析 npm 可执行文件路径（支持 local.properties 中自定义 Node.js 路径）
+    def localNodePath = getLocalProperty('node.path')
+    def npmCommand = 'npm'
+
+    if (localNodePath) {
+        def nodeFile = file(localNodePath)
+
+        if (nodeFile.isFile()) {
+            // localNodePath 指向 node 可执行文件（如 /usr/local/bin/node）
+            def binDir = nodeFile.parentFile
+            def npmInSameDir = new File(binDir, 'npm')
+            if (npmInSameDir.exists()) {
+                npmCommand = npmInSameDir.absolutePath
+                def currentPath = System.getenv('PATH') ?: ''
+                environment 'PATH', "${binDir.absolutePath}${File.pathSeparator}${currentPath}"
+            }
+        } else if (nodeFile.isDirectory()) {
+            // localNodePath 指向目录，检查 bin/npm
+            def npmInBin = new File(nodeFile, 'bin/npm')
+            def npmInDir = new File(nodeFile, 'npm')
+            if (npmInBin.exists()) {
+                npmCommand = npmInBin.absolutePath
+                def currentPath = System.getenv('PATH') ?: ''
+                environment 'PATH', "${new File(nodeFile, 'bin').absolutePath}${File.pathSeparator}${currentPath}"
+            } else if (npmInDir.exists()) {
+                npmCommand = npmInDir.absolutePath
+                def currentPath = System.getenv('PATH') ?: ''
+                environment 'PATH', "${nodeFile.absolutePath}${File.pathSeparator}${currentPath}"
+            }
+        }
+
+        println "Using custom Node.js path: ${localNodePath}"
+    }
+
+    if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+        commandLine 'cmd', '/c', npmCommand, 'run', 'build'
+    } else {
+        commandLine npmCommand, 'run', 'build'
+    }
+
+    onlyIf { webviewDir.exists() && !skipWebviewBuild }
+    doFirst { println 'Building webview...' }
+    doLast { println 'Webview build completed.' }
+}
+
+// 确保 compileJava 在 webview 构建之后运行
+tasks.named('compileJava') {
+    dependsOn('buildWebview')
+}
+
+// processResources 必须在 buildWebview 之后（因为 copy-dist 将 HTML 写入 resources）
+tasks.named('processResources') {
+    mustRunAfter('buildWebview')
+}
+
+// IDE 沙箱任务也需要 webview 构建
+tasks.matching { it.name.startsWith('prepareSandbox') }.configureEach {
+    dependsOn('buildWebview')
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}

@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const cwd = process.cwd();
 const distFile = path.resolve(cwd, 'dist/index.html');
-const targetFile = path.resolve(cwd, '../src/main/resources/html/claude-chat.html');
+const targetFile = path.resolve(cwd, '../src/main/resources/html/protean-chat.html');
 
 const main = async () => {
   const html = await readFile(distFile, 'utf-8');

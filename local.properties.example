@@ -1,0 +1,9 @@
+# 本地开发配置模板
+# 将此文件复制为 local.properties 并根据你的本地环境修改
+# local.properties 不会被提交到 git
+
+# Node.js 可执行文件路径（用于构建 webview）
+# 可以是 node 的完整路径，也可以是包含 node 的目录
+# node.path=/usr/local/bin/node
+# node.path=/home/user/.nvm/versions/node/v20.10.0/bin/node
+# node.path=C:\\Program Files\\nodejs\\node.exe
