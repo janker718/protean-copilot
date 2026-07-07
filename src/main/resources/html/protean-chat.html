@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Protean Copilot</title>
+<style>
+/* ---- Reset & Base ---- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+    --bg-primary: #1e1e1e;
+    --bg-secondary: #252526;
+    --bg-input: #2d2d30;
+    --text-primary: #cccccc;
+    --text-secondary: #969696;
+    --border-color: #3e3e42;
+    --accent-color: #4fc1ff;
+    --accent-hover: #3aa5d9;
+    --error-color: #f85149;
+    --success-color: #50c878;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+body.light {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f5f5;
+    --bg-input: #ececec;
+    --text-primary: #333333;
+    --text-secondary: #666666;
+    --border-color: #d4d4d4;
+}
+
+html, body {
+    height: 100%;
+    font-family: var(--font-sans);
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+}
+
+/* ---- Layout ---- */
+#root {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* ---- Header ---- */
+#header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+#header h1 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+#status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--success-color);
+    display: inline-block;
+    margin-right: 4px;
+}
+
+/* ---- Messages Area ---- */
+#messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.message {
+    padding: 10px 14px;
+    border-radius: 8px;
+    max-width: 85%;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.message.user {
+    align-self: flex-end;
+    background: var(--accent-color);
+    color: #fff;
+}
+.message.assistant {
+    align-self: flex-start;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+.message.system {
+    align-self: center;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-style: italic;
+    border: none;
+}
+.message.error {
+    align-self: flex-start;
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--error-color);
+    border: 1px solid var(--error-color);
+}
+.message .code-block {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 8px;
+    margin: 8px 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    overflow-x: auto;
+}
+
+/* ---- Loading indicator ---- */
+#loading-indicator {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+#loading-indicator.active { display: flex; }
+.loading-dots {
+    display: flex; gap: 4px;
+}
+.loading-dots span {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent-color);
+    animation: pulse 1.4s infinite ease-in-out both;
+}
+.loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+.loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+@keyframes pulse {
+    0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
+    40% { transform: scale(1); opacity: 1; }
+}
+
+/* ---- Input Area ---- */
+#input-area {
+    display: flex;
+    flex-direction: column;
+    padding: 12px 16px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+#input-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+#prompt-input {
+    flex: 1;
+    resize: none;
+    min-height: 36px;
+    max-height: 200px;
+    padding: 8px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.4;
+    outline: none;
+    transition: border-color 0.2s;
+}
+#prompt-input:focus {
+    border-color: var(--accent-color);
+}
+#prompt-input::placeholder {
+    color: var(--text-secondary);
+}
+#send-btn {
+    padding: 8px 16px;
+    background: var(--accent-color);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.2s;
+    white-space: nowrap;
+}
+#send-btn:hover { background: var(--accent-hover); }
+#send-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+#context-info {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+#context-info:empty { display: none; }
+</style>
+</head>
+<body>
+<script>
+// ===== Theme initialization (executed synchronously) =====
+(function() {
+    var theme = window.__INITIAL_IDE_THEME__ || 'dark';
+    if (theme === 'light') {
+        document.body.classList.add('light');
+    }
+})();
+</script>
+
+<div id="root">
+    <div id="header">
+        <h1>&#x1F916; Protean Copilot</h1>
+        <div><span id="status-dot"></span><span id="status-text">Ready</span></div>
+    </div>
+
+    <div id="messages">
+        <div class="message system">Welcome to Protean Copilot. Ask a question or type a prompt to get started.</div>
+    </div>
+
+    <div id="loading-indicator"><div class="loading-dots"><span></span><span></span><span></span></div>Thinking...</div>
+
+    <div id="input-area">
+        <div id="input-row">
+            <textarea id="prompt-input" placeholder="Ask Protean Copilot about this project..." rows="1"></textarea>
+            <button id="send-btn" onclick="sendMessage()">Send</button>
+        </div>
+        <div id="context-info"></div>
+    </div>
+</div>
+
+<script>
+// ===== JavaScript Bridge =====
+// These functions are called from the Kotlin side via JBCefJSQuery
+
+var __isStreaming = false;
+
+// Called when the frontend is fully loaded
+function frontendReady() {
+    console.log('[Protean] Frontend ready');
+    try {
+        sendToJava(JSON.stringify({ type: '__frontend_ready__', content: '{}' }));
+    } catch (e) {
+        console.error('[Protean] Failed to send frontend_ready:', e);
+    }
+}
+
+// ---- Bridge: Kotlin -> JavaScript (called via browser.executeJavaScript) ----
+
+function addSelectionInfo(info) {
+    console.log('[Protean] addSelectionInfo:', info);
+    var ctx = document.getElementById('context-info');
+    if (ctx) {
+        try {
+            ctx.textContent = 'Context: ' + JSON.parse(info).path || info;
+        } catch (e) {
+            ctx.textContent = 'Context: ' + info;
+        }
+    }
+}
+
+function clearSelectionInfo() {
+    console.log('[Protean] clearSelectionInfo');
+    var ctx = document.getElementById('context-info');
+    if (ctx) ctx.textContent = '';
+}
+
+function addCodeSnippet(code) {
+    console.log('[Protean] addCodeSnippet received');
+    addMessage('user', code || '');
+}
+
+function updateSessionTitle(title) {
+    console.log('[Protean] updateSessionTitle:', title);
+    document.title = title || 'Protean Copilot';
+}
+
+function addErrorMessage(error) {
+    console.error('[Protean] addErrorMessage:', error);
+    if (error) addMessage('error', error);
+}
+
+function onPermissionDenied(info) {
+    console.warn('[Protean] onPermissionDenied:', info);
+    if (info) addMessage('system', 'Permission denied: ' + info);
+}
+
+function onStreamEnd() {
+    console.log('[Protean] onStreamEnd');
+    __isStreaming = false;
+    setLoading(false);
+}
+
+function onStreamStart() {
+    console.log('[Protean] onStreamStart');
+    __isStreaming = true;
+    setLoading(true);
+}
+
+function onContentDelta(delta) {
+    // Streaming text delta - for future real-time display
+    console.log('[Protean] onContentDelta:', delta ? delta.substring(0, 50) + '...' : '');
+}
+
+function onThinkingDelta(delta) {
+    // Streaming thinking delta - for future display
+    console.log('[Protean] onThinkingDelta:', delta ? delta.substring(0, 50) + '...' : '');
+}
+
+function updateMessages(messagesJson, sequence) {
+    console.log('[Protean] updateMessages seq=' + sequence);
+}
+
+function updateSlashCommands(commandsJson) {
+    console.log('[Protean] updateSlashCommands received');
+}
+
+function onStreamingHeartbeat() {
+    // Keep-alive signal during streaming
+}
+
+function showLoading(show) {
+    setLoading(show === 'true' || show === true);
+}
+
+function historyLoadComplete() {
+    console.log('[Protean] historyLoadComplete');
+    setLoading(false);
+}
+
+function focusChatInput() {
+    var input = document.getElementById('prompt-input');
+    if (input) {
+        input.focus();
+    }
+}
+
+function updateStatus(statusText) {
+    var el = document.getElementById('status-text');
+    if (el) el.textContent = statusText || 'Updated';
+}
+
+function onUsageUpdate(usageJson) {
+    console.log('[Protean] onUsageUpdate:', usageJson);
+}
+
+function onModeReceived(mode) {
+    console.log('[Protean] onModeReceived:', mode);
+}
+
+function updateDollarCommands(commandsJson) {
+    console.log('[Protean] updateDollarCommands received');
+}
+
+function clearMessages() {
+    var container = document.getElementById('messages');
+    if (container) {
+        container.innerHTML = '';
+    }
+}
+
+function applyIdeaFontConfig(configJson) {
+    console.log('[Protean] applyIdeaFontConfig');
+}
+
+function applyUiFontConfig(configJson) {
+    console.log('[Protean] applyUiFontConfig');
+}
+
+function applyCodeFontConfig(configJson) {
+    console.log('[Protean] applyCodeFontConfig');
+}
+
+function applyIdeaLanguageConfig(configJson) {
+    console.log('[Protean] applyIdeaLanguageConfig');
+}
+
+function setTabStatus(status) {
+    console.log('[Protean] setTabStatus:', status);
+}
+
+// ===== Local UI Functions =====
+
+function addMessage(type, text) {
+    var container = document.getElementById('messages');
+    if (!container) return;
+    var msg = document.createElement('div');
+    msg.className = 'message ' + type;
+    msg.textContent = text;
+    container.appendChild(msg);
+    container.scrollTop = container.scrollHeight;
+}
+
+function setLoading(active) {
+    var el = document.getElementById('loading-indicator');
+    if (el) {
+        if (active) {
+            el.classList.add('active');
+        } else {
+            el.classList.remove('active');
+        }
+    }
+}
+
+function sendMessage() {
+    var input = document.getElementById('prompt-input');
+    if (!input) return;
+    var text = input.value.trim();
+    if (!text) return;
+
+    addMessage('user', text);
+    input.value = '';
+    input.style.height = 'auto';
+    setLoading(true);
+
+    try {
+        sendToJava(JSON.stringify({
+            type: 'user_message',
+            content: text
+        }));
+    } catch (e) {
+        console.error('[Protean] Failed to send message:', e);
+        addMessage('error', 'Failed to send message: ' + e.message);
+        setLoading(false);
+    }
+}
+
+// Auto-resize textarea
+document.addEventListener('DOMContentLoaded', function() {
+    var input = document.getElementById('prompt-input');
+    if (input) {
+        input.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+        });
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    }
+
+    // Signal frontend readiness
+    frontendReady();
+});
+
+// ===== Heartbeat (prevents WebviewWatchdog from triggering) =====
+(function() {
+    var lastRaf = 0;
+    function rafTick() {
+        lastRaf = performance.now();
+        requestAnimationFrame(rafTick);
+    }
+    requestAnimationFrame(rafTick);
+
+    setInterval(function() {
+        try {
+            sendToJava(JSON.stringify({
+                type: 'heartbeat',
+                raf: lastRaf,
+                visibility: document.visibilityState,
+                focus: document.hasFocus()
+            }));
+        } catch (e) {
+            // sendToJava may not be injected yet during early init
+        }
+    }, 5000);
+})();
+</script>
+</body>
+</html>

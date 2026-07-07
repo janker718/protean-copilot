@@ -1,0 +1,36 @@
+<idea-plugin>
+    <id>com.protean.copilot</id>
+    <name>Protean Copilot</name>
+    <vendor email="dev@protean.local" url="https://example.com">Protean</vendor>
+
+    <description><![CDATA[
+        Protean Copilot is a programming assistant plugin skeleton for IntelliJ IDEA.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow
+            id="Protean Copilot"
+            anchor="right"
+            factoryClass="com.protean.copilot.ui.ProteanToolWindow" />
+
+        <notificationGroup
+            id="ProteanCopilot Notifications"
+            displayType="BALLOON" />
+    </extensions>
+
+    <actions>
+        <group
+            id="ProteanCopilot.Menu"
+            text="Protean Copilot"
+            popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last" />
+            <action
+                id="ProteanCopilot.ExplainSelection"
+                class="com.protean.copilot.actions.ExplainSelectionAction"
+                text="Explain Selection"
+                description="Collect the current selection or file for Protean Copilot" />
+        </group>
+    </actions>
+</idea-plugin>

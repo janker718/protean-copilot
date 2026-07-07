@@ -1,0 +1,11 @@
+.gradle/
+build/
+out/
+.idea/
+*.iml
+
+# IntelliJ Platform sandbox
+**/build/idea-sandbox/
+.intellijPlatform/
+/.run/
+/.kotlin
