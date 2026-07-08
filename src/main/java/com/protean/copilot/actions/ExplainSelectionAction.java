@@ -1,6 +1,6 @@
 package com.protean.copilot.actions;
 
-import com.protean.copilot.context.IdeContextCollector;
+import com.protean.copilot.handler.context.IdeContextCollector;
 import com.protean.copilot.notifications.ProteanNotifier;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;

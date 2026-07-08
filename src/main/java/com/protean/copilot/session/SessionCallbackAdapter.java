@@ -186,9 +186,9 @@ public class SessionCallbackAdapter {
     public void updateMessages(String messagesJson) {
         if (!active) return;
         try {
-            jsTarget.callJavaScript("updateMessages", messagesJson);
+            streamCoalescer.enqueue(messagesJson);
         } catch (Exception e) {
-            LOG.warn("消息更新发送失败: " + e.getMessage());
+            LOG.warn("消息更新入队失败: " + e.getMessage());
         }
     }
 

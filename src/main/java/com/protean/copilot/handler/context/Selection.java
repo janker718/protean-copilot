@@ -1,4 +1,4 @@
-package com.protean.copilot.context;
+package com.protean.copilot.handler.context;
 
 /**
  * 表示编辑器中的文本选区。

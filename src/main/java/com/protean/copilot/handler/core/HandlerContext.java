@@ -1,4 +1,4 @@
-package com.protean.copilot.handler;
+package com.protean.copilot.handler.core;
 
 import com.protean.copilot.bridge.SdkBridge;
 import com.protean.copilot.session.ChatSession;

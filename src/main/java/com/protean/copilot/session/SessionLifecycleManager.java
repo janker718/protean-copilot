@@ -1,6 +1,6 @@
 package com.protean.copilot.session;
 
-import com.protean.copilot.handler.HandlerContext;
+import com.protean.copilot.handler.core.HandlerContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -48,9 +48,9 @@ public class SessionLifecycleManager {
         LOG.info("Creating new session...");
 
         ChatSession oldSession = host.getSession();
-        String previousMode = oldSession.permissionMode;
-        String previousProvider = oldSession.provider;
-        String previousModel = oldSession.model;
+        String previousMode = oldSession.getPermissionMode();
+        String previousProvider = oldSession.getProvider();
+        String previousModel = oldSession.getModel();
 
         host.invalidateSessionCallbacks();
         host.getStreamCoalescer().resetStreamState();
@@ -66,10 +66,10 @@ public class SessionLifecycleManager {
                 host.callJavaScript("showLoading", "false");
             });
 
-            ChatSession newSession = new ChatSession(host.getProject(), oldSession.sdkBridge);
-            newSession.permissionMode = previousMode;
-            newSession.provider = previousProvider;
-            newSession.model = previousModel;
+            ChatSession newSession = new ChatSession(host.getProject(), oldSession.getSdkBridge());
+            newSession.setPermissionMode(previousMode);
+            newSession.setProvider(previousProvider);
+            newSession.setModel(previousModel);
 
             completeNewSessionBootstrap(newSession);
         }).exceptionally(ex -> {

@@ -3,6 +3,7 @@
 `Protean Copilot` 的产品思路、技术架构、当前状态和后续演进路线的总入口。子文档按维护约定拆分：
 
 - [architecture.md](./architecture.md) — 总体架构、各层职责、设计原则、代码模块规划
+- [development-progress.md](./development-progress.md) — 当前开发进度、半实现模块、下一步优先级
 - [context-engine.md](./context-engine.md) — IDE 上下文采集策略
 - [agent-runtime.md](./agent-runtime.md) — Agent 执行流程与流式事件体系
 - [debug-and-run.md](./debug-and-run.md) — 调试和运行说明
@@ -155,6 +156,7 @@
 | 文档 | 说明 |
 |---|---|
 | [project-plan.md](./project-plan.md) | 本文件 — 项目总入口 |
+| [development-progress.md](./development-progress.md) | 当前开发进度快照 |
 | [architecture.md](./architecture.md) | 总体架构、设计原则、代码模块 |
 | [context-engine.md](./context-engine.md) | IDE 上下文采集策略 |
 | [agent-runtime.md](./agent-runtime.md) | Agent 执行流程与流式事件 |

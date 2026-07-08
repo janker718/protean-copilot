@@ -1,4 +1,4 @@
-package com.protean.copilot.diff;
+package com.protean.copilot.handler.diff;
 
 import org.jetbrains.annotations.Nullable;
 

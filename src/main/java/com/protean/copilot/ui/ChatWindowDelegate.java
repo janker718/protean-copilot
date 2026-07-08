@@ -1,8 +1,12 @@
 package com.protean.copilot.ui;
 
 import com.protean.copilot.bridge.SdkBridge;
-import com.protean.copilot.diff.DiffHandler;
-import com.protean.copilot.handler.*;
+import com.protean.copilot.handler.core.HandlerContext;
+import com.protean.copilot.handler.core.MessageDispatcher;
+import com.protean.copilot.handler.core.MessageHandler;
+import com.protean.copilot.handler.diff.DiffHandler;
+import com.protean.copilot.handler.HistoryHandler;
+import com.protean.copilot.handler.PermissionHandler;
 import com.protean.copilot.permission.PermissionService;
 import com.protean.copilot.provider.claude.ClaudeSDKBridge;
 import com.protean.copilot.session.ChatSession;
@@ -11,6 +15,7 @@ import com.protean.copilot.session.StreamMessageCoalescer;
 import com.protean.copilot.settings.SettingsService;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonArray;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.jcef.JBCefBrowser;
@@ -69,7 +74,6 @@ public class ChatWindowDelegate {
     }
 
     private final DelegateHost host;
-
     private volatile HandlerContext handlerContext = null;
     private volatile MessageDispatcher messageDispatcher = null;
     private volatile PermissionHandler permissionHandler = null;
@@ -127,7 +131,7 @@ public class ChatWindowDelegate {
             @Override
             public boolean handle(String type, String content) {
                 switch (type) {
-                    case "send_message", "user_message" -> {
+                    case "send_message", "user_message", "send_message_with_attachments" -> {
                         LOG.info("用户消息: " + (content != null && content.length() > 100
                             ? content.substring(0, 100) : content));
 
@@ -135,6 +139,8 @@ public class ChatWindowDelegate {
                             // 解析消息内容
                             String text;
                             String permissionMode = "bypassPermissions";
+                            String reasoningEffort = null;
+                            List<ChatSession.Attachment> attachments = null;
 
                             try {
                                 JsonObject msg = JsonParser.parseString(content).getAsJsonObject();
@@ -143,6 +149,12 @@ public class ChatWindowDelegate {
                                     : content;
                                 if (msg.has("permissionMode")) {
                                     permissionMode = msg.get("permissionMode").getAsString();
+                                }
+                                if (msg.has("reasoningEffort")) {
+                                    reasoningEffort = msg.get("reasoningEffort").getAsString();
+                                }
+                                if (msg.has("attachments") && msg.get("attachments").isJsonArray()) {
+                                    attachments = parseAttachments(msg.getAsJsonArray("attachments"));
                                 }
                             } catch (Exception e) {
                                 // 消息不是 JSON 格式，直接作为纯文本处理
@@ -160,22 +172,18 @@ public class ChatWindowDelegate {
 
                             // 获取会话信息
                             ChatSession session = context.getSession();
-                            String cwd = session.cwd;
-                            String model = context.getCurrentModel();
-                            String re = session.reasoningEffort;
+                            session.setModel(context.getCurrentModel());
+                            session.setProvider(context.getCurrentProvider());
 
-                            // 确保 sessionId 存在（首次查询时自动生成）
-                            if (session.sessionId == null) {
-                                session.sessionId = UUID.randomUUID().toString();
-                                LOG.info("自动生成 sessionId: " + session.sessionId);
-                            }
-
-                            // 通知前端进入加载状态
-                            context.callJavaScript("onStreamStart");
-
-                            // 发起查询
-                            bridge.query(session.sessionId, text, cwd, model,
-                                permissionMode, re)
+                            session.send(
+                                text,
+                                attachments,
+                                null,
+                                null,
+                                permissionMode,
+                                reasoningEffort,
+                                null
+                            )
                                 .whenComplete((v, ex) -> {
                                     if (ex != null) {
                                         String errMsg = ex.getMessage() != null
@@ -205,7 +213,7 @@ public class ChatWindowDelegate {
                             s.interrupt();
                             context.callJavaScript("onStreamEnd");
                             context.callJavaScript("showLoading", "false");
-                            LOG.info("会话已中断: " + s.sessionId);
+                            LOG.info("会话已中断: " + s.getSessionId());
                         }
                         return true;
                     }
@@ -213,6 +221,10 @@ public class ChatWindowDelegate {
                     // 切换 AI 提供商
                     case "set_provider" -> {
                         context.setCurrentProvider(content);
+                        ChatSession session = context.getSession();
+                        if (session != null) {
+                            session.setProvider(content);
+                        }
                         LOG.info("提供商已切换: " + content);
                         return true;
                     }
@@ -220,6 +232,10 @@ public class ChatWindowDelegate {
                     // 切换模型
                     case "set_model" -> {
                         context.setCurrentModel(content);
+                        ChatSession session = context.getSession();
+                        if (session != null) {
+                            session.setModel(content);
+                        }
                         LOG.info("模型已切换: " + content);
                         return true;
                     }
@@ -230,7 +246,7 @@ public class ChatWindowDelegate {
 
             @Override
             public List<String> getSupportedTypes() {
-                return List.of("send_message", "user_message",
+                return List.of("send_message", "user_message", "send_message_with_attachments",
                     "interrupt_session", "set_provider", "set_model");
             }
         });
@@ -239,6 +255,25 @@ public class ChatWindowDelegate {
         dispatcher.registerHandler(new DiffHandler(handlerContext));
 
         LOG.info("Handlers initialized: " + dispatcher.getHandlerCount() + " handlers registered");
+    }
+
+    private static List<ChatSession.Attachment> parseAttachments(JsonArray array) {
+        List<ChatSession.Attachment> attachments = new ArrayList<>();
+        for (int i = 0; i < array.size(); i++) {
+            if (!array.get(i).isJsonObject()) {
+                continue;
+            }
+            JsonObject object = array.get(i).getAsJsonObject();
+            attachments.add(new ChatSession.Attachment(
+                object.has("fileName") && !object.get("fileName").isJsonNull()
+                    ? object.get("fileName").getAsString() : "",
+                object.has("mediaType") && !object.get("mediaType").isJsonNull()
+                    ? object.get("mediaType").getAsString() : "",
+                object.has("data") && !object.get("data").isJsonNull()
+                    ? object.get("data").getAsString() : ""
+            ));
+        }
+        return attachments;
     }
 
     /**
@@ -261,7 +296,7 @@ public class ChatWindowDelegate {
      */
     public void loadPermissionModeFromSettings() {
         String mode = host.getSettingsService().getPermissionMode();
-        host.getSession().permissionMode = mode;
+        host.getSession().setPermissionMode(mode);
         LOG.info("Permission mode loaded: " + mode);
     }
 
@@ -277,7 +312,7 @@ public class ChatWindowDelegate {
      */
     public void syncActiveProvider() {
         String provider = host.getSettingsService().getProvider();
-        host.getSession().provider = provider;
+        host.getSession().setProvider(provider);
         LOG.info("Active provider synced: " + provider);
     }
 

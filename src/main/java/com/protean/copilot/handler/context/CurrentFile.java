@@ -1,4 +1,4 @@
-package com.protean.copilot.context;
+package com.protean.copilot.handler.context;
 
 /**
  * 表示当前打开的文件信息。

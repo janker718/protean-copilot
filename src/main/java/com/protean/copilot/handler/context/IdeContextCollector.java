@@ -1,4 +1,4 @@
-package com.protean.copilot.context;
+package com.protean.copilot.handler.context;
 
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;

@@ -1,4 +1,4 @@
-package com.protean.copilot.diff;
+package com.protean.copilot.handler.diff;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;

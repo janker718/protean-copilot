@@ -1,4 +1,4 @@
-package com.protean.copilot.handler;
+package com.protean.copilot.handler.core;
 
 import com.intellij.openapi.diagnostic.Logger;
 import java.util.ArrayList;

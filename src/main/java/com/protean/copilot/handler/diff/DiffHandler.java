@@ -1,9 +1,9 @@
-package com.protean.copilot.diff;
+package com.protean.copilot.handler.diff;
 
 import com.google.gson.Gson;
 import com.intellij.openapi.diagnostic.Logger;
-import com.protean.copilot.handler.HandlerContext;
-import com.protean.copilot.handler.MessageHandler;
+import com.protean.copilot.handler.core.HandlerContext;
+import com.protean.copilot.handler.core.MessageHandler;
 
 import java.util.ArrayList;
 import java.util.List;

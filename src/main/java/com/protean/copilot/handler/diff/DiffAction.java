@@ -1,4 +1,4 @@
-package com.protean.copilot.diff;
+package com.protean.copilot.handler.diff;
 
 /**
  * 用户对交互式差异视图的操作。

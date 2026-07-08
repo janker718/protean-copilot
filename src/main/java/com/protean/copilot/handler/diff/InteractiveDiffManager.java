@@ -1,4 +1,4 @@
-package com.protean.copilot.diff;
+package com.protean.copilot.handler.diff;
 
 import com.intellij.diff.DiffContentFactory;
 import com.intellij.diff.DiffDialogHints;

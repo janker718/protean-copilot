@@ -1,4 +1,4 @@
-package com.protean.copilot.handler;
+package com.protean.copilot.handler.core;
 
 import java.util.List;
 

@@ -1,7 +1,10 @@
 package com.protean.copilot.ui.toolwindow;
 
 import com.protean.copilot.bridge.SdkBridge;
-import com.protean.copilot.handler.*;
+import com.protean.copilot.handler.core.HandlerContext;
+import com.protean.copilot.handler.core.MessageDispatcher;
+import com.protean.copilot.handler.HistoryHandler;
+import com.protean.copilot.handler.PermissionHandler;
 import com.protean.copilot.permission.PermissionService;
 import com.protean.copilot.provider.claude.ClaudeSDKBridge;
 import com.protean.copilot.session.*;
@@ -579,7 +582,7 @@ public class ProteanChatWindow {
     }
 
     public String getCurrentProvider() {
-        return session.provider;
+        return session.getProvider();
     }
 
     public ChatSession getSession() {
@@ -819,12 +822,12 @@ public class ProteanChatWindow {
         if (tabIndex < 0) return;
 
         TabStateService.TabSessionState state = new TabStateService.TabSessionState(
-            session.provider,
+            session.getProvider(),
             sessionId,
-            session.cwd,
-            session.model,
-            session.permissionMode,
-            session.reasoningEffort
+            session.getCwd(),
+            session.getModel(),
+            session.getPermissionMode(),
+            session.getReasoningEffort()
         );
         TabStateService.getInstance(project).saveTabSessionState(tabIndex, state);
     }

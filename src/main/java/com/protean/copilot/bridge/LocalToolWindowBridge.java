@@ -1,8 +1,8 @@
 package com.protean.copilot.bridge;
 
 import com.intellij.openapi.project.Project;
-import com.protean.copilot.context.IdeContext;
-import com.protean.copilot.context.IdeContextCollector;
+import com.protean.copilot.handler.context.IdeContext;
+import com.protean.copilot.handler.context.IdeContextCollector;
 import com.protean.copilot.notifications.ProteanNotifier;
 import java.util.function.Consumer;
 

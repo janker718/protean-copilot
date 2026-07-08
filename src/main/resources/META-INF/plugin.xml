@@ -8,6 +8,8 @@
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends optional="true" config-file="terminal-features.xml">org.jetbrains.plugins.terminal</depends>
+    <depends optional="true" config-file="java-features.xml">com.intellij.java</depends>
 
     <resource-bundle>messages.ProteanCopilotBundle</resource-bundle>
 
@@ -16,6 +18,13 @@
             id="Protean Copilot"
             anchor="right"
             factoryClass="com.protean.copilot.ui.ProteanToolWindow" />
+
+        <postStartupActivity implementation="com.protean.copilot.startup.ProteanStartupActivity" />
+        <postStartupActivity implementation="com.protean.copilot.startup.BridgePrewarmActivity" />
+
+        <statusBarWidgetFactory
+            id="ProteanCopilot.StatusBar"
+            implementation="com.protean.copilot.statusbar.ProteanStatusBarWidgetFactory" />
 
         <notificationGroup
             id="ProteanCopilot Notifications"
@@ -33,6 +42,14 @@
                 class="com.protean.copilot.actions.ExplainSelectionAction"
                 text="Explain Selection"
                 description="Collect the current selection or file for Protean Copilot" />
+            <separator />
+            <reference ref="ProteanCopilot.OpenToolWindow" />
         </group>
+
+        <action
+            id="ProteanCopilot.OpenToolWindow"
+            class="com.protean.copilot.actions.OpenToolWindowAction"
+            text="Open Protean Copilot"
+            description="Open the Protean Copilot tool window" />
     </actions>
 </idea-plugin>

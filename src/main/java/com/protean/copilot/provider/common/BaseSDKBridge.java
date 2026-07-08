@@ -237,6 +237,16 @@ public abstract class BaseSDKBridge {
         // 构建进程：node <scriptPath>
         ProcessBuilder pb = new ProcessBuilder(nodePath, scriptPath);
         pb.environment().put("NODE_ENV", "production");
+
+        // 设置 NODE_PATH 以便 Node.js 能找到 @anthropic-ai/claude-code
+        String nodePathEnv = resolveNodePath(scriptPath);
+        if (nodePathEnv != null && !nodePathEnv.isEmpty()) {
+            pb.environment().put("NODE_PATH", nodePathEnv);
+            LOG.info("  NODE_PATH: " + nodePathEnv);
+        }
+
+        // 设置工作目录为脚本所在目录（便于 Node.js 解析相对路径模块）
+        pb.directory(scriptFile.getParent().toFile());
         pb.redirectErrorStream(false);
 
         try {
@@ -882,6 +892,100 @@ public abstract class BaseSDKBridge {
         if (shutdownLatch != null) {
             shutdownLatch.countDown();
         }
+    }
+
+    // ==================== 内部：NODE_PATH 解析 ====================
+
+    /**
+     * 解析 NODE_PATH 以定位 {@code @anthropic-ai/claude-code} 包。
+     * 尝试以下路径（按优先级）：
+     * <ol>
+     *   <li>全局 npm node_modules（{@code npm root -g}）</li>
+     *   <li>项目 webview/node_modules（开发环境）</li>
+     *   <li>常用全局安装路径</li>
+     * </ol>
+     */
+    private String resolveNodePath(String scriptPath) {
+        StringBuilder nodePaths = new StringBuilder();
+
+        // 1. 通过 npm root -g 获取全局 node_modules
+        try {
+            Process p = new ProcessBuilder("npm", "root", "-g")
+                .redirectErrorStream(true)
+                .start();
+            String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            p.waitFor(5, TimeUnit.SECONDS);
+            if (!output.isEmpty() && Files.isDirectory(Path.of(output))) {
+                if (nodePaths.length() > 0) nodePaths.append(File.pathSeparator);
+                nodePaths.append(output);
+                LOG.info("全局 npm node_modules: " + output);
+            }
+        } catch (Exception e) {
+            LOG.debug("无法获取全局 npm root: " + e.getMessage());
+        }
+
+        // 2. 检查 webview/node_modules（开发环境）
+        try {
+            // scriptPath 在 /tmp/protean-copilot/xxx.mjs
+            // 项目根在 ../../../../ 相对于 src/main/resources/bridge/
+            Path scriptFile = Path.of(scriptPath);
+            // 尝试从多个级别向上查找 webview/node_modules
+            for (int levels = 1; levels <= 6; levels++) {
+                Path candidate = scriptFile.getParent();
+                for (int i = 0; i < levels; i++) {
+                    if (candidate != null) candidate = candidate.getParent();
+                }
+                if (candidate != null) {
+                    Path webviewModules = candidate.resolve("webview/node_modules");
+                    if (Files.isDirectory(webviewModules)) {
+                        if (nodePaths.length() > 0) nodePaths.append(File.pathSeparator);
+                        nodePaths.append(webviewModules.toAbsolutePath().toString());
+                        LOG.info("找到 webview/node_modules: " + webviewModules);
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOG.debug("查找 webview/node_modules 失败: " + e.getMessage());
+        }
+
+        // 3. 常见 macOS/Linux 全局路径
+        String home = System.getProperty("user.home");
+        String[] commonPaths = {
+            "/usr/local/lib/node_modules",
+            "/usr/lib/node_modules",
+            home + "/.nvm/versions/node/*/lib/node_modules",  // nvm
+            home + "/.node_modules",                           // 旧版 npm
+            home + "/node_modules",
+        };
+        for (String path : commonPaths) {
+            if (path.contains("*")) {
+                // 通配符：尝试最近匹配的
+                Path parent = Path.of(path.replace("/*", ""));
+                try {
+                    if (Files.isDirectory(parent)) {
+                        var dirs = Files.list(parent).filter(Files::isDirectory).sorted((a, b) -> b.compareTo(a)).toList();
+                        for (var dir : dirs) {
+                            Path libModules = dir.resolve("lib/node_modules");
+                            if (Files.isDirectory(libModules)) {
+                                if (!nodePaths.toString().contains(libModules.toString())) {
+                                    if (nodePaths.length() > 0) nodePaths.append(File.pathSeparator);
+                                    nodePaths.append(libModules.toAbsolutePath().toString());
+                                }
+                                break;
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+            } else if (Files.isDirectory(Path.of(path))) {
+                if (!nodePaths.toString().contains(path)) {
+                    if (nodePaths.length() > 0) nodePaths.append(File.pathSeparator);
+                    nodePaths.append(path);
+                }
+            }
+        }
+
+        return nodePaths.toString();
     }
 
     // ==================== 内部：JS 回调辅助方法 ====================

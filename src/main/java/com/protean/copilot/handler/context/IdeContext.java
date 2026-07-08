@@ -1,4 +1,4 @@
-package com.protean.copilot.context;
+package com.protean.copilot.handler.context;
 
 import java.util.List;
 import java.util.Objects;

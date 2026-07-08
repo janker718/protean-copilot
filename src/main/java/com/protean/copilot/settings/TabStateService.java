@@ -1,28 +1,51 @@
 package com.protean.copilot.settings;
 
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.Service;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
-import java.util.concurrent.ConcurrentHashMap;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
- * 持久化和恢复标签页会话状态。
- * 从参考实现的 TabStateService 移植而来。
+ * 持久化标签页会话状态，基于 IntelliJ {@link PersistentStateComponent}。
+ *
+ * <p>状态以 XML 格式存储在 {@code proteanTabState.xml} 中，项目级别。
+ * IDE 重启后自动恢复。
  */
-public class TabStateService {
+@State(
+    name = "ProteanTabState",
+    storages = @Storage("proteanTabState.xml")
+)
+@Service(Service.Level.PROJECT)
+public final class TabStateService implements PersistentStateComponent<TabStateService.State> {
 
     private static final Logger LOG = Logger.getInstance(TabStateService.class);
-    private static final ConcurrentHashMap<String, TabStateService> instanceCache = new ConcurrentHashMap<>();
 
     /**
-     * 获取或创建给定项目的 TabStateService 实例。
+     * 获取项目级 TabStateService 实例。
      */
-    public static TabStateService getInstance(Project project) {
-        String key = String.valueOf(project.getLocationHash());
-        return instanceCache.computeIfAbsent(key, k -> new TabStateService());
+    public static TabStateService getInstance(@NotNull Project project) {
+        return project.getService(TabStateService.class);
+    }
+
+    // ---- 内部状态 Bean ----
+
+    /**
+     * 序列化到 XML 的状态对象。
+     */
+    public static class State {
+        public Map<Integer, TabSessionState> tabSessions = new HashMap<>();
+        public int tabCount = 1;
     }
 
     /**
-     * 表示标签页会话的已保存状态。
+     * 表示标签页的会话快照。
      */
     public record TabSessionState(
         String provider,
@@ -33,32 +56,45 @@ public class TabStateService {
         String reasoningEffort
     ) {
         public TabSessionState() {
-            this("protean", null, null, "default", "bypassPermissions", null);
+            this("claude", null, null, "default", "bypassPermissions", null);
         }
     }
 
-    private final ConcurrentHashMap<Integer, TabSessionState> stateMap = new ConcurrentHashMap<>();
+    // ---- 运行时状态 ----
 
-    /**
-     * 保存给定索引处标签页的会话状态。
-     */
-    public void saveTabSessionState(int index, TabSessionState state) {
-        stateMap.put(index, state);
-        LOG.info("Saved tab session state at index " + index + ": provider=" + state.provider() + ", sessionId=" + state.sessionId());
+    private State state = new State();
+
+    @Override
+    public @Nullable State getState() {
+        return state;
     }
 
-    /**
-     * 获取给定索引处标签页的会话状态。
-     * @return 已保存的状态，如果此索引没有状态则返回 null
-     */
+    @Override
+    public void loadState(@NotNull State loaded) {
+        this.state = loaded;
+    }
+
+    // ---- 公共 API ----
+
+    public void saveTabSessionState(int index, TabSessionState sessionState) {
+        state.tabSessions.put(index, sessionState);
+        LOG.info("Saved tab session state at index " + index);
+    }
+
+    @Nullable
     public TabSessionState getTabSessionState(int index) {
-        return stateMap.get(index);
+        return state.tabSessions.get(index);
     }
 
-    /**
-     * 清除标签页的会话状态。
-     */
     public void clearTabSessionState(int index) {
-        stateMap.remove(index);
+        state.tabSessions.remove(index);
+    }
+
+    public int getTabCount() {
+        return state.tabCount;
+    }
+
+    public void setTabCount(int count) {
+        state.tabCount = count;
     }
 }
