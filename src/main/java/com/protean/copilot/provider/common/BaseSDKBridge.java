@@ -613,6 +613,7 @@ public abstract class BaseSDKBridge {
             case "stream_end"         -> handleStreamEnd(message);
             case "streaming_heartbeat"-> handleStreamingHeartbeat(message);
             case "error"              -> handleError(message);
+            case "prewarmed"          -> handlePrewarmed(message);
             default                   -> LOG.info("未知消息类型: " + type);
         }
     }
@@ -764,6 +765,77 @@ public abstract class BaseSDKBridge {
                 }
             }
         }
+    }
+
+    /**
+     * 处理 prewarm 完成事件。
+     * 完成 __prewarm__ session 的 future 并清理临时状态。
+     */
+    private void handlePrewarmed(JsonObject message) {
+        String status = message.has("status")
+            ? message.get("status").getAsString() : "ok";
+
+        SessionState state = activeSessions.get("__prewarm__");
+        if (state != null && state.responseFuture != null && !state.responseFuture.isDone()) {
+            if ("ok".equals(status)) {
+                state.responseFuture.complete(null);
+                LOG.info(getProviderName() + " SDK prewarm 完成");
+            } else {
+                String error = message.has("error")
+                    ? message.get("error").getAsString() : "prewarm failed";
+                state.responseFuture.completeExceptionally(new RuntimeException(error));
+                LOG.warn(getProviderName() + " SDK prewarm 失败: " + error);
+            }
+        }
+        activeSessions.remove("__prewarm__");
+    }
+
+    // ==================== 公共：SDK 预加载 ====================
+
+    /**
+     * 预加载 SDK，消除首次查询时的启动延迟。
+     *
+     * <p>通过向 Node.js 进程发送 prewarm 命令，触发 SDK 的 import 和初始化管线。
+     * 应在 {@link #start(String)} 完成且收到 ready 信号后调用。</p>
+     *
+     * <p>如果 prewarm 失败或桥接未运行，方法会以异常完成 future，
+     * 但这不影响后续正常查询 —— SDK 将在首次查询时按需加载。</p>
+     *
+     * @param cwd            工作目录（项目根路径），可为 null
+     * @param model          模型标识符（为 null 时使用默认）
+     * @param permissionMode 权限模式（为 null 时使用 "bypassPermissions"）
+     * @return 在 SDK 预加载完成时完成的 CompletableFuture
+     */
+    public CompletableFuture<Void> prewarm(String cwd, String model, String permissionMode) {
+        if (!isRunning()) {
+            CompletableFuture<Void> failed = new CompletableFuture<>();
+            failed.completeExceptionally(new IllegalStateException(
+                getProviderName() + " SDK 桥接未运行"));
+            return failed;
+        }
+
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        SessionState state = new SessionState("__prewarm__", cwd);
+        state.responseFuture = future;
+        activeSessions.put("__prewarm__", state);
+
+        JsonObject msg = new JsonObject();
+        msg.addProperty("type", "prewarm");
+        msg.addProperty("cwd", cwd != null ? cwd : System.getProperty("user.dir"));
+        msg.addProperty("model", model != null ? model : getDefaultModel());
+        msg.addProperty("permissionMode",
+            permissionMode != null ? permissionMode : "bypassPermissions");
+
+        try {
+            writeMessage(msg);
+            LOG.info(getProviderName() + " SDK prewarm 命令已发送");
+        } catch (Exception e) {
+            LOG.warn("发送 prewarm 命令失败: " + e.getMessage());
+            activeSessions.remove("__prewarm__");
+            future.completeExceptionally(e);
+        }
+
+        return future;
     }
 
     // ==================== 内部：进程退出处理 ====================

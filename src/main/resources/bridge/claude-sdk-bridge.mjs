@@ -85,8 +85,62 @@ async function handleMessage(msg) {
       return handleInterrupt(msg);
     case 'shutdown':
       return handleShutdown();
+    case 'prewarm':
+      return handlePrewarm(msg);
     default:
       sendError(`Unknown message type: ${msg.type}`, 'UNKNOWN_TYPE');
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// SDK 预加载
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 处理 prewarm 消息 —— 提前触发 SDK 的 import 和初始化。
+ * 这样首次用户查询时 SDK 已加载到内存，消除 3-5 秒的冷启动延迟。
+ */
+async function handlePrewarm(msg) {
+  try {
+    // 确保 SDK 已加载（顶层 await 可能已加载，但也可能因错误而未加载）
+    if (!claudeSDK) {
+      claudeSDK = await import('@anthropic-ai/claude-code');
+      sdkVersion = claudeSDK.default?.version || claudeSDK.version || 'unknown';
+    }
+
+    // 获取查询函数以验证 API 可用
+    const queryFn = claudeSDK.query || claudeSDK.default?.query;
+    if (typeof queryFn !== 'function') {
+      respond({ type: 'prewarmed', status: 'error',
+        error: 'SDK does not expose a query() function' });
+      return;
+    }
+
+    // 创建临时 query 以触发 SDK 内部初始化管线（如认证、hook 注册等），
+    // 但不发送实际用户消息
+    const queryOptions = {
+      prompt: '',
+      model: msg.model || 'claude-sonnet-4-6',
+      permissionMode: msg.permissionMode || 'bypassPermissions',
+      cwd: msg.cwd || process.cwd(),
+      maxTurns: 0,
+    };
+
+    try {
+      const query = queryFn(queryOptions);
+      // 立即关闭以释放资源，但 SDK 内部的模块缓存和连接池已初始化
+      if (query && typeof query.close === 'function') {
+        await query.close();
+      }
+    } catch (e) {
+      // 空 prompt 可能导致 SDK 抛出错误，这不影响预加载效果
+      // SDK 模块本身已在 import 时加载完成
+    }
+
+    respond({ type: 'prewarmed', status: 'ok' });
+  } catch (e) {
+    console.error('[bridge] Prewarm failed:', e.message);
+    respond({ type: 'prewarmed', status: 'error', error: e.message });
   }
 }
 

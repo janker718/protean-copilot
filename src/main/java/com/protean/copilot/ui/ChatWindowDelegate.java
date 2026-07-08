@@ -1,6 +1,7 @@
 package com.protean.copilot.ui;
 
 import com.protean.copilot.bridge.SdkBridge;
+import com.protean.copilot.diff.DiffHandler;
 import com.protean.copilot.handler.*;
 import com.protean.copilot.permission.PermissionService;
 import com.protean.copilot.provider.claude.ClaudeSDKBridge;
@@ -233,6 +234,9 @@ public class ChatWindowDelegate {
                     "interrupt_session", "set_provider", "set_model");
             }
         });
+
+        // 注册 Diff 处理器（show_diff, show_interactive_diff 等 6 种消息）
+        dispatcher.registerHandler(new DiffHandler(handlerContext));
 
         LOG.info("Handlers initialized: " + dispatcher.getHandlerCount() + " handlers registered");
     }

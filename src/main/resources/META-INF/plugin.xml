@@ -9,6 +9,8 @@
 
     <depends>com.intellij.modules.platform</depends>
 
+    <resource-bundle>messages.ProteanCopilotBundle</resource-bundle>
+
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow
             id="Protean Copilot"

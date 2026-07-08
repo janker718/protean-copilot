@@ -120,6 +120,17 @@ public class ProteanChatWindow {
                 String nodePath = settingsService.getNodePath();
                 claudeBridge.start(nodePath);
                 LOG.info("Claude SDK 桥接启动成功");
+
+                // 启动后立即预加载 SDK，消除首次查询的 3-5 秒冷启动延迟
+                claudeBridge.prewarm(
+                    project.getBasePath(), null, null
+                ).thenAccept(v ->
+                    LOG.info("Claude SDK prewarm 完成")
+                ).exceptionally(ex -> {
+                    LOG.warn("Claude SDK prewarm 失败（将在首次查询时加载）: "
+                        + ex.getMessage());
+                    return null;
+                });
             } catch (Exception e) {
                 LOG.error("启动 Claude SDK 桥接失败: " + e.getMessage(), e);
                 ApplicationManager.getApplication().invokeLater(() -> {

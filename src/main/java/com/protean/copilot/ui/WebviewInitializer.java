@@ -6,7 +6,6 @@ import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefJSQuery;
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
-import org.cef.handler.CefDisplayHandlerAdapter;
 import org.cef.handler.CefLoadHandlerAdapter;
 
 import javax.swing.*;
@@ -73,26 +72,6 @@ public class WebviewInitializer {
                 });
             }
 
-            // 注册控制台消息处理器，用于 JS -> Java 通信
-            // 前端通过 console.log 发送带有 __PROTEAN__ 前缀的消息
-            browser.getJBCefClient().addDisplayHandler(new CefDisplayHandlerAdapter() {
-                @Override
-                public boolean onConsoleMessage(
-                    CefBrowser browser,
-                    org.cef.CefSettings.LogSeverity level,
-                    String message,
-                    String source,
-                    int line
-                ) {
-                    if (message.startsWith("__PROTEAN__:")) {
-                        String payload = message.substring("__PROTEAN__:".length());
-                        host.handleJavaScriptMessage(payload);
-                        return true;
-                    }
-                    return false;
-                }
-            }, browser.getCefBrowser());
-
             // 注册加载处理器，在页面加载后注入 JS 桥接
             browser.getJBCefClient().addLoadHandler(new CefLoadHandlerAdapter() {
                 @Override
@@ -150,29 +129,33 @@ public class WebviewInitializer {
 
     /**
      * 将 JS 桥接代码注入到已加载的页面中。
-     * 该桥接允许前端调用 `sendToJava(message)`。
+     * 使用 {@link JBCefJSQuery} 实现 JS→Java 通信，
+     * 替代原有的 console.log 拦截方案，确保生产构建中桥接不被断开。
      */
     private void injectJsBridge(CefBrowser browser, CefFrame frame) {
         try {
+            if (jsQuery == null) {
+                LOG.warn("JBCefJSQuery not initialized, skipping bridge injection");
+                return;
+            }
+
+            // 使用 JBCefJSQuery.inject() 生成原生 JCEF IPC 调用
+            String injection = "window.sendToJava = function(msg) { "
+                + jsQuery.inject("msg") + " };";
+            frame.executeJavaScript(injection, frame.getURL(), 0);
+
+            // 通知前端桥接已就绪
             frame.executeJavaScript(
                 """
                 (function() {
-                    // 使用控制台消息桥接注入 sendToJava 函数
-                    window.sendToJava = function(msg) {
-                        console.log('__PROTEAN__:' + msg);
-                    };
-
-                    // 通知前端就绪
-                    if (typeof frontendReady === 'function') {
-                        frontendReady();
-                    }
-
-                    console.log('[Protean] JS bridge injected');
+                    console.log('[Protean] JS bridge injected via JBCefJSQuery');
                 })();
                 """,
                 frame.getURL(),
                 0
             );
+
+            LOG.info("JS bridge injected via JBCefJSQuery");
         } catch (Exception e) {
             LOG.warn("Failed to inject JS bridge: " + e.getMessage());
         }
