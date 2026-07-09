@@ -272,7 +272,9 @@ public class ChatWindowDelegate {
         String sessionId = UUID.randomUUID().toString();
         try {
             PermissionService permissionService = PermissionService.getInstance(host.getProject(), sessionId);
-            context.setPermissionService(permissionService);
+            if (handlerContext != null) {
+                handlerContext.setPermissionService(permissionService);
+            }
             permissionService.setPermissionMode(host.getSettingsService().getPermissionMode());
             if (permissionHandler != null) {
                 permissionHandler.bindPermissionService(permissionService);

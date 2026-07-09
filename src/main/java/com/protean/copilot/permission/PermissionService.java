@@ -296,10 +296,13 @@ public class PermissionService {
     }
 
     private PermissionManager.PermissionMode mapPermissionMode(@Nullable String mode) {
+        if (mode == null) {
+            return PermissionManager.PermissionMode.DEFAULT;
+        }
         return switch (mode) {
             case "acceptEdits" -> PermissionManager.PermissionMode.ACCEPT_EDITS;
             case "bypassPermissions" -> PermissionManager.PermissionMode.ALLOW_ALL;
-            case "default", "plan", null -> PermissionManager.PermissionMode.DEFAULT;
+            case "default", "plan" -> PermissionManager.PermissionMode.DEFAULT;
             default -> PermissionManager.PermissionMode.DEFAULT;
         };
     }

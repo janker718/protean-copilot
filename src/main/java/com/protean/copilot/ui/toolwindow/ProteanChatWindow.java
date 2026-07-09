@@ -238,8 +238,11 @@ public class ProteanChatWindow {
             @Override
             public void clearPermissionDecisionMemory() {
                 try {
-                    PermissionService.getInstance(project, sessionId != null ? sessionId : "").clearDecisionMemory();
-                } catch (Exception ignored) {
+                    if (sessionId != null && !sessionId.isEmpty()) {
+                        PermissionService.getInstance(project, sessionId).clearDecisionMemory();
+                    }
+                } catch (Exception e) {
+                    LOG.warn("Failed to clear permission decision memory: " + e.getMessage());
                 }
             }
 

@@ -2,122 +2,135 @@
 
 更新时间：2026-07-09
 
-本文档基于两个代码库的当前实际状态整理：
+本文档基于两个仓库当前代码状态整理：
 
 - 当前项目：`/Users/janker/Documents/ProteanCopilot`
-- 对标项目：`/Users/janker/Documents/code/github/jetbrains-cc-gui`
+- 参考项目：`/Users/janker/Documents/code/github/jetbrains-cc-gui`
 
-目的不是泛泛描述“做得怎么样”，而是回答四个具体问题：
+目的：
 
-1. 当前项目已经实现了哪些核心能力。
-2. 相对 `jetbrains-cc-gui`，哪些模块只是骨架，哪些已经形成闭环。
-3. 还有哪些关键能力明显缺失。
-4. 接下来开发顺序应该怎么排。
+1. 梳理当前项目和参考项目的结构对应关系。
+2. 说明哪些能力已经对齐，哪些还只是部分复刻。
+3. 记录最近一轮 Claude history 改造后的真实进度。
+4. 给出下一阶段更合理的推进顺序。
 
 ---
 
 ## 一句话结论
 
-`ProteanCopilot` 已经完成了 **插件主骨架、JCEF + React 前端、Claude SDK 桥接主链、会话与消息分发骨架、基础历史索引和 diff 处理框架**，已经不是空壳。
+`ProteanCopilot` 现在已经不是单纯的 Claude 聊天窗原型，而是一个已经具备：
 
-但如果按 `jetbrains-cc-gui` 的成熟度来对比，当前仍处在：
+- IntelliJ 插件壳
+- JCEF + React WebView
+- Claude provider 主链
+- handler/core 分发层
+- session 生命周期骨架
+- history 子系统第一轮 provider 化
+- permission 子系统第一轮接线
 
-- **核心主链可运行**
-- **平台层已经起步**
-- **权限 / Provider 扩展 / 完整历史 / MCP / Skills / Codex / 配置体系仍未补齐**
+的可编译原型。
 
-更准确地说，当前项目已经从“能打开聊天窗”走到了“有清晰架构边界的 Claude-only 原型”，但还没有达到 `jetbrains-cc-gui` 那种“多子系统完整协作”的阶段。
+和 `jetbrains-cc-gui` 相比，当前项目已经开始对齐参考项目的目录边界和职责拆分，但整体仍明显停留在：
+
+- `Claude-only`
+- `单项目骨架已形成`
+- `多 Provider / 深权限 / 深历史 / 技能体系未完成`
+
+的阶段。
 
 ---
 
-## 当前仓库事实
-
-### 代码规模
+## 当前客观规模
 
 | 维度 | ProteanCopilot | jetbrains-cc-gui |
 |---|---:|---:|
-| Java 文件数 | 74 | 268 |
-| 前端形态 | React + Vite + singlefile | React + WebView |
-| Provider 后端 | Claude 为主 | Claude + Codex |
-| 历史系统 | 内存索引 + 局部操作 | Provider 级完整历史体系 |
-| 权限系统 | 占位 | 完整权限管理链 |
-
-结论：
-
-- 当前项目的 Java 侧体量大约是参考项目的四分之一。
-- 前端 UI 很丰富，但后端能力覆盖面明显小于参考项目。
-
-### 最近已确认的本地状态
+| Java 文件数 | 112 | 268 |
+| Claude provider 目录 | 已形成 | 完整 |
+| Codex provider 目录 | 无 | 完整 |
+| history handler/history/provider 三层 | 已形成 | 完整 |
+| permission 子系统 | 已形成第一轮骨架 | 完整 |
+| session 子模块拆分深度 | 中等 | 高 |
 
 已验证：
 
 - `./gradlew compileJava`
 
-说明当前 Java 主干在编译层面是自洽的，包括最近新增的：
-
-- `handler/core/BaseMessageHandler`
-- `HistoryHandler` 及其 history service 拆分
-- `cache/history/settings.manager` 这批平台化骨架
-
-未在本次进度整理中重新验证：
+未在本次整理中重新验证：
 
 - `runIde`
-- Webview Vitest 测试
-- 插件交互级联行为
+- WebView 交互级联
+- 历史 UI 的完整回归
 
-所以本文档里的“已实现”，默认表示：
+因此文档里的“已实现”表示：
 
-- 代码已存在且结构上接通
-- 不等于真实产品行为已经和参考项目等价
+- 代码存在
+- 依赖接线打通
+- 编译通过
+
+不表示行为已经和参考项目完全等价。
 
 ---
 
-## 当前已实现
+## 结构对照
 
-### 1. 插件入口和主窗口骨架已就位
+### 当前项目已经对齐的主目录
 
-当前项目已经具备完整的 IntelliJ 插件基础入口：
+`ProteanCopilot` 当前已经具备这些与参考项目同类的核心边界：
 
-- Tool Window
-- Action
-- Startup Activity
-- Status Bar
-- JCEF WebView 初始化
+- `bridge`
+- `cache`
+- `handler`
+- `handler/core`
+- `handler/context`
+- `handler/diff`
+- `handler/history`
+- `handler/provider`
+- `history`
+- `permission`
+- `provider/common`
+- `provider/claude`
+- `session`
+- `settings`
+- `startup`
+- `ui/toolwindow`
+- `util`
 
-关键文件：
+这说明当前项目已经从“功能全堆在窗口类里”的阶段，进入了“按子系统分层”的阶段。
 
-- [plugin.xml](/Users/janker/Documents/ProteanCopilot/src/main/resources/META-INF/plugin.xml)
-- [ProteanToolWindow.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/ui/ProteanToolWindow.java)
-- [ProteanChatWindow.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/ui/toolwindow/ProteanChatWindow.java)
-- [ChatWindowDelegate.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/ui/ChatWindowDelegate.java)
-- [ProteanStartupActivity.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/startup/ProteanStartupActivity.java)
-- [BridgePrewarmActivity.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/startup/BridgePrewarmActivity.java)
+### 仍明显缺失的主目录能力
 
-对比 `jetbrains-cc-gui`：
+相对参考项目，当前项目还没有或明显偏薄：
 
-- 这层的总体设计方向已经对齐。
-- 但 `jetbrains-cc-gui` 还有 detached window、更多 action、更多窗口生命周期管理，这部分当前项目还没有。
-
-### 2. WebView 前端已经很完整
-
-`webview/src` 已经不是 demo，而是完整前端应用，包含：
-
-- 聊天页面
-- 历史页面
-- 设置页面
-- MCP 相关组件
-- Provider 相关组件
-- Tool block 展示
-- Usage / Context / Permission / Rewind / Search 等 UI
-- 多语言 i18n
-- 大量 hook 和前端测试
+- `provider/codex`
+- `skill`
+- `service` 大量平台服务层
+- `terminal`
+- `watcher`
+- 更完整的 `action/*`
+- 更完整的 `ui/detached`
 
 结论：
 
-- 当前项目前端成熟度明显高于 Java 后端。
-- 很多 UI 已经准备好了，但后端能力还没完全跟上。
+- 目录结构已经开始像参考项目。
+- 但完整产品所需的横向子系统还没有铺满。
 
-### 3. Java ↔ JS 消息分发骨架已对齐参考项目
+---
+
+## 当前已对齐或接近对齐的部分
+
+### 1. 插件入口和 WebView 主壳
+
+当前项目已经具备完整的 IntelliJ 插件基础入口，包括：
+
+- tool window
+- startup activity
+- status bar
+- JCEF 页面初始化
+- React/Vite 单文件打包接入
+
+这部分和参考项目在方向上已经一致，差距主要在附加窗口、更多 action、更多运行时管理细节，不在主骨架。
+
+### 2. handler/core 分发模式
 
 当前项目已经抽出了：
 
@@ -126,468 +139,314 @@
 - [BaseMessageHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/core/BaseMessageHandler.java)
 - [MessageDispatcher.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/core/MessageDispatcher.java)
 
-这说明当前项目已经不再把所有桥接逻辑散落在 `ProteanChatWindow` 里，而是开始进入参考项目那种“handler 可扩展”的结构。
+这一层已经不是参考项目之外的自创组织，而是在向 `jetbrains-cc-gui` 的 handler 体系靠拢。
 
-对比 `jetbrains-cc-gui`：
+当前差距不在“有没有 core”，而在“handler 覆盖面不够广”。
 
-- `handler/core` 这一层已经基本对齐。
-- 但 handler 的覆盖面差距很大。参考项目有大量专门 handler，当前项目只覆盖了少数能力。
+### 3. Claude provider 主链
 
-### 4. Claude SDK 主链已经可以工作
+当前项目已经具备 Claude 发送主链：
 
-已有核心类：
-
-- [SdkBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/bridge/SdkBridge.java)
 - [BaseSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/common/BaseSDKBridge.java)
 - [ClaudeSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeSDKBridge.java)
-- [claude-sdk-bridge.mjs](/Users/janker/Documents/ProteanCopilot/src/main/resources/bridge/claude-sdk-bridge.mjs)
+- Node bridge 资源文件
+- session send / callback / lifecycle 接线
 
-当前主链能力：
+这部分说明当前项目的主工作流已经脱离 demo。
 
-- 启动 Node 子进程桥接
-- 进行 Claude SDK 通信
-- Tool Window 发消息
-- 流式回调回到前端
-- 中断会话
-- prewarm 预热
+相对参考项目，差距主要在：
 
-结论：
+- daemon 协调层更薄
+- provider 内部子服务拆分更少
+- Codex 分支尚未引入
 
-- 当前项目已经具备“Claude-only IDE Chat”主链。
-- 这是当前最扎实的一层。
+### 4. session 主链
 
-### 5. 会话与流式更新链已经初步形成
-
-已有：
+当前项目已有：
 
 - [ChatSession.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/ChatSession.java)
 - [SessionSendService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionSendService.java)
 - [SessionLifecycleManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionLifecycleManager.java)
 - [SessionCallbackAdapter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionCallbackAdapter.java)
 - [StreamMessageCoalescer.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/StreamMessageCoalescer.java)
+- [MessageParser.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/MessageParser.java)
 
-这里和旧文档不同：
+和参考项目相比，当前 session 层已经具备“发送、回调、聚合、恢复”的基本链路，但还没有进一步拆到：
 
-- `StreamMessageCoalescer` 已经不是桩，而是有节流、心跳、批量推送逻辑的真实实现。
+- `SessionProviderRouter`
+- `SessionMessageOrchestrator`
+- `ReplayDeduplicator`
+- `MessageMerger`
+- Claude/Codex 分治消息处理器
 
-对比 `jetbrains-cc-gui`：
+判断：
 
-- 当前项目已有主链，但缺少参考项目那套更细的 session 子模块，例如：
-  - `SessionProviderRouter`
-  - `SessionMessageOrchestrator`
-  - `ClaudeMessageHandler`
-  - `CodexMessageHandler`
-  - `ReplayDeduplicator`
-  - `MessageMerger`
-  - `StreamDeltaThrottler`
+- 当前 session 层可运行。
+- 参考项目的 session 层更产品化。
 
-也就是说：
+---
 
-- 当前项目会话层“能跑”
-- 参考项目会话层“已产品化拆分”
+## 最近已经完成的重点进展
 
-### 6. 历史模块已经从“空实现”升级到“部分闭环”
+### 1. Claude history provider 侧第一轮补齐
 
-当前项目已有：
+这轮已经新增：
 
-- [HistoryHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/HistoryHandler.java)
+- [ClaudeHistoryReader.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeHistoryReader.java)
+- [ClaudeHistoryParser.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeHistoryParser.java)
+- [ClaudeHistoryIndexService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeHistoryIndexService.java)
+- [ClaudeHistorySearchService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeHistorySearchService.java)
+- [ClaudeSessionLiteReader.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeSessionLiteReader.java)
+- [SessionLiteReader.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/common/SessionLiteReader.java)
+- [TagExtractor.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/util/TagExtractor.java)
+- [TextSanitizer.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/util/TextSanitizer.java)
+- [PathUtils.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/util/PathUtils.java)
+
+这意味着当前项目的 history 不再只是内存会话列表，而是已经有了 provider 侧磁盘读取、解析、lite-read 的基础能力。
+
+### 2. HistoryIndexService 已升级为双层模型
+
+[HistoryIndexService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/history/HistoryIndexService.java) 当前已经从“只读运行期缓存”升级为：
+
+- 运行期 `SessionIndexCache`
+- Claude provider 历史读取
+- 合并 `favorited/customTitle/entrypoint`
+- 统一按 `updatedAt` 输出
+
+也就是说，历史列表的主入口已经开始向参考项目那种“统一索引服务”靠拢，而不是每个 handler 自己直连 provider。
+
+### 3. history handler 链已形成第一轮闭环
+
+当前已有：
+
 - [HistoryLoadService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/history/HistoryLoadService.java)
-- [HistoryDeleteService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/history/HistoryDeleteService.java)
 - [HistoryMessageInjector.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/history/HistoryMessageInjector.java)
 - [HistoryExportBridgeService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/history/HistoryExportBridgeService.java)
 - [HistoryMetadataBridgeService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/history/HistoryMetadataBridgeService.java)
 - [HistorySessionConversionService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/history/HistorySessionConversionService.java)
-- [HistoryMetadataService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/history/HistoryMetadataService.java)
-- [HistoryIndexService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/history/HistoryIndexService.java)
-- [SessionIndexCache.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/cache/SessionIndexCache.java)
-- [SessionIndexEntry.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/cache/SessionIndexEntry.java)
+- [HistoryDeleteService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/history/HistoryDeleteService.java)
 
-当前已经接通的动作：
+当前已经接通的能力包括：
 
-- `load_history_data`
-- `load_session`
-- `delete_session`
-- `delete_sessions`
-- `export_session`
-- `toggle_favorite`
-- `update_title`
-- `delete_title`
-- `deep_search_history`
-- `convert_to_cli_session`
+- 历史列表加载
+- 历史会话回放
+- 历史导出
+- 收藏/标题修改
+- CLI session 转换
+- 批量删除
 
-但要注意真实边界：
+和旧进度相比，最重要的变化是：
 
-- 当前历史系统本质上还是 **项目内存索引驱动**
-- 不是像参考项目那样的 **Provider 级磁盘历史读取 + 搜索 + parser + session lite reader**
+- 当前项目已经不是“history 只有内存索引”
+- 也已经不是“缺少 ClaudeHistoryReader / Parser / Search / Index”
 
-对比 `jetbrains-cc-gui`，当前缺少：
+### 4. permission 子系统不再是纯占位
 
-- `ClaudeHistoryReader`
-- `ClaudeHistoryParser`
-- `ClaudeHistorySearchService`
-- `ClaudeHistoryIndexService`
-- `CodexHistoryReader`
-- `CodexHistoryParser`
-- `CodexHistoryIndexService`
-- `SubagentHistoryService`
-- Provider 级历史恢复
-
-结论：
-
-- 历史模块已经不是空白。
-- 但还只是“本地会话索引层”，还没达到“真实历史系统”。
-
-### 7. Diff 模块已经有完整包边界
-
-当前项目已有：
-
-- [DiffHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/diff/DiffHandler.java)
-- [SimpleDiffDisplayHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/diff/SimpleDiffDisplayHandler.java)
-- [InteractiveDiffHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/diff/InteractiveDiffHandler.java)
-- [InteractiveDiffManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/diff/InteractiveDiffManager.java)
-- [DiffBrowserBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/diff/DiffBrowserBridge.java)
-- [DiffFileOperations.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/diff/DiffFileOperations.java)
-
-结论：
-
-- 和历史模块类似，当前 diff 不再是想法，已经有明确代码组织。
-- 但相对参考项目的权限审批链，它还没有接入完整的“工具权限 -> diff 审查 -> 用户决策 -> 写入”链路。
-
----
-
-## 当前未实现或明显不完整
-
-### 1. 权限系统基本还是占位
-
-当前文件：
+当前权限目录已存在：
 
 - [PermissionService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionService.java)
-- [PermissionHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/PermissionHandler.java)
+- [PermissionManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionManager.java)
+- [PermissionDecisionStore.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionDecisionStore.java)
+- [PermissionRequestWatcher.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionRequestWatcher.java)
+- [PermissionDialogRouter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionDialogRouter.java)
+- [PermissionSessionRegistry.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionSessionRegistry.java)
+- [ToolInterceptor.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/ToolInterceptor.java)
+- [DiffReviewService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/DiffReviewService.java)
 
-实际情况：
+另外 [PermissionHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/PermissionHandler.java) 也已经具备前端对话框请求和响应接线。
 
-- `PermissionHandler` 只有 `clearPendingRequests()`
-- `PermissionService` 只有实例缓存和空方法
+判断：
 
-对比 `jetbrains-cc-gui`，当前缺少整个权限子系统：
-
-- `PermissionRequest`
-- `PermissionManager`
-- `PermissionDecisionStore`
-- `PermissionRequestWatcher`
-- `PermissionDialogRouter`
-- `ToolInterceptor`
-- `DiffReviewService`
-- `PermissionSessionRegistry`
-
-结论：
-
-- 这是当前和参考项目差距最大的后端模块之一。
-
-### 2. Provider 架构只完成了 Claude 分支
-
-当前项目虽有 `ProviderManager` 和部分前端 Provider UI，但 Java 后端实际只有 Claude 主线。
-
-现状：
-
-- `ProviderManager` 目前只是轻量切换和归一化
-- 没有 `CodexSDKBridge`
-- 没有 Codex history / usage / quota / provider-specific adapter
-- 没有 provider 路由层
-
-对比 `jetbrains-cc-gui`：
-
-- 参考项目同时具备 `provider/claude/*` 与 `provider/codex/*`
-- 还有更多 provider 配置管理类和消息转换类
-
-结论：
-
-- 当前项目还不能称为真正的多 Provider 架构。
-- 现在更准确的描述是：前端为多 Provider 预留了 UI，后端仍是 Claude-only。
-
-### 3. 很多 handler 仍缺失
-
-当前项目 handler 覆盖面仍很小，主要是：
-
-- 用户消息匿名 handler
-- `HistoryHandler`
-- `DiffHandler`
-- `PermissionHandler` 占位
-
-而参考项目还包含大量独立 handler：
-
-- `SessionHandler`
-- `SettingsHandler`
-- `PromptHandler`
-- `AgentHandler`
-- `SkillHandler`
-- `McpServerHandler`
-- `TabHandler`
-- `WindowEventHandler`
-- `RewindHandler`
-- `ContextHandler`
-- `InputHistoryHandler`
-- `DependencyHandler`
-- `NodePathHandler`
-- `ProjectConfigHandler`
-- `UsagePushService`
-
-结论：
-
-- 当前项目的 handler 架构已经搭起来了。
-- 但业务 handler 的覆盖度还很低，仍需要持续补面。
-
-### 4. MCP / Prompt / Skill 体系只有结构，没有完整行为
-
-当前项目有：
-
-- [McpServerManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/settings/manager/McpServerManager.java)
-- [PromptManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/settings/manager/PromptManager.java)
-
-但整体仍比较薄，缺少：
-
-- 后端 handler
-- 文件扫描 / registry / 持久化
-- Provider 侧实际注入
-- 技能命令扫描体系
-
-对比参考项目，当前还缺失：
-
-- `SkillService`
-- `CodexSkillService`
-- `SlashCommandRegistry`
-- `PromptManagerFactory`
-- `ProjectPromptManager`
-- `GlobalPromptManager`
-- `SkillManager`
-- `SessionTemplateService`
-- `McpServerHandler`
-- `CodexMcpServerHandler`
-
-### 5. Daemon / common provider 层仍不完整
-
-当前项目虽然有：
-
-- `BaseSDKBridge`
-- `ClaudeSDKBridge`
-
-但以下类还不完整或不存在：
-
-- [DaemonBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/DaemonBridge.java) 目前是占位
-- 没有 provider common 下更细的 request / result / callback / lite reader 体系
-
-这说明当前 bridge 层主要解决“Claude SDK 能调用”，还没达到参考项目那种更细分的桥接中间层。
-
-### 6. Settings 和 Manager 层刚起步
-
-当前项目并不是旧文档里写的“多数硬编码默认值”了：
-
-- [SettingsService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/settings/SettingsService.java) 已经基于 `PropertiesComponent` 做持久化
-- `ProviderManager`、`WorkingDirectoryManager`、`McpServerManager` 已存在
-
-但对比参考项目，当前还差：
-
-- 更完整的 Provider 设置拆分
-- Codex/Claude 分治配置
-- Session template
-- Prompt scope 管理
-- 排序、导入导出、路径管理
-
-结论：
-
-- Settings 层已经脱离“纯桩”状态。
-- 但距离参考项目的完整配置体系还有明显差距。
+- 当前权限系统仍未达到参考项目的成熟度。
+- 但已经不能再描述成“只有空方法的占位实现”。
 
 ---
 
-## 对比 `jetbrains-cc-gui` 的模块进度表
+## 与参考项目相比仍明显落后的部分
 
-### A. 主链能力
+### 1. Claude history provider 仍是简化版
 
-| 能力 | 当前状态 | 判断 |
-|---|---|---|
-| Tool Window + JCEF + React | 已实现 | 已具备 |
-| Claude SDK Node 桥接 | 已实现 | 已具备 |
-| 流式消息展示 | 已实现 | 已具备 |
-| 会话创建 / 发送 / 中断 | 已实现 | 已具备 |
-| 历史索引与列表返回 | 已实现 | 部分具备 |
-| Diff 展示 | 已实现 | 部分具备 |
-| 权限审批闭环 | 未实现 | 缺失 |
-| 多 Provider 路由 | 未实现 | 缺失 |
-| Codex 后端 | 未实现 | 缺失 |
-| Skills / MCP 后端体系 | 未实现 | 缺失 |
+虽然当前已经补了 `ClaudeHistoryReader/Parser/Index/Search/LiteReader`，但和参考项目相比仍缺：
 
-### B. 与参考项目的接近程度
+- 内存缓存策略
+- 文件索引持久化
+- 增量扫描
+- usage 聚合
+- 更完整的 deep search
+- 更细的异常恢复与回退策略
 
-| 模块 | 当前项目 | 相对参考项目判断 |
-|---|---|---|
-| UI / Webview | 完整度较高 | 接近 |
-| Handler Core | 已抽象 | 接近 |
-| Claude 会话主链 | 可用 | 中等接近 |
-| 历史系统 | 局部闭环 | 差距较大 |
-| 权限系统 | 占位 | 差距很大 |
-| Provider 扩展 | Claude-only | 差距很大 |
-| Settings 体系 | 初步可用 | 差距较大 |
-| Skills / MCP | UI 有，后端弱 | 差距很大 |
-| Diff 审批写入链 | 半实现 | 差距较大 |
+当前的 [ClaudeHistoryIndexService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeHistoryIndexService.java) 本质上还是“lite-read 优先 + parser fallback”的简化实现，不是参考项目那种更完整的索引管理器方案。
+
+### 2. 多 Provider 仍未开始
+
+参考项目已经有完整的：
+
+- `provider/claude/*`
+- `provider/codex/*`
+
+当前项目只有 `provider/claude/*` 和少量 `provider/common/*`，没有：
+
+- `CodexSDKBridge`
+- Codex history
+- Codex usage / session service
+- provider 路由层
+
+这决定了当前项目仍然是 Claude-only。
+
+### 3. session 子模块拆分还不够深
+
+参考项目的 session 侧比当前项目更细，典型缺口包括：
+
+- `SessionProviderRouter`
+- `SessionMessageOrchestrator`
+- `SessionState`
+- `CallbackHandler`
+- `MessageMerger`
+- `ReplayDeduplicator`
+- `ClaudeMessageHandler`
+- `CodexMessageHandler`
+
+当前项目能跑，但还没有把会话主链沉淀成足够稳定、可扩展的中间层。
+
+### 4. handler 覆盖面仍偏小
+
+当前项目虽然有 `handler/core`、`handler/history`、`handler/diff`、`handler/provider`，但相比参考项目仍明显缺少大量业务 handler，例如：
+
+- settings
+- prompt
+- skill
+- agent
+- MCP server
+- rewind
+- tab/window event
+- dependency / node path / project config
+
+所以当前的 handler 体系已经有骨架，但还谈不上“功能面接近参考项目”。
+
+### 5. permission 仍未形成完整产品闭环
+
+虽然权限系统不再是空壳，但当前仍需继续验证和补强：
+
+- 文件写入审批的全链路覆盖
+- 命令执行审批接线
+- diff review 和权限决策联动
+- 持久化决策策略
+- 会话隔离与过期策略
+- 前后端异常状态恢复
+
+因此更准确的判断是：
+
+- `permission` 已经起步
+- 但距离“可放心作为 IDE Agent 安全边界使用”仍有距离
+
+### 6. 技能 / MCP / Prompt 后端闭环仍薄
+
+当前项目已经有 manager 层和前端 UI 痕迹，但和参考项目相比，后端仍缺：
+
+- 更完整的 registry
+- provider 注入逻辑
+- slash command / skill 管理
+- session template / prompt scope
+- 更丰富的 handler 接线
+
+这部分目前更像“预留结构”，还不是完成态。
 
 ---
 
-## 当前开发阶段判断
+## 当前阶段判断
 
-如果把项目阶段粗分为 4 层：
+如果把项目分成四层：
 
-1. 插件壳子
+1. 插件壳
 2. 单 Provider 聊天主链
 3. IDE Agent 基础设施
-4. 多 Provider + 权限 + 历史 + 技能 + 审计的完整产品
+4. 多 Provider + 深权限 + 深历史 + 技能 + 审计的完整产品
 
-当前项目大致处于：
+当前项目更准确的位置是：
 
-- **第 2 层已完成**
-- **第 3 层进行中**
-- **第 4 层刚开始搭骨架**
+- 第 1 层：已完成
+- 第 2 层：已完成
+- 第 3 层：进行中
+- 第 4 层：刚起步
 
-这也是为什么当前项目会呈现出一个比较明显的特征：
+其中最近最明显的推进，是第 3 层里的：
 
-- 前端看起来已经很像完整产品
-- 但后端很多系统还没进入真正的产品化实现
-
----
-
-## 接下来该做什么
-
-建议下一阶段不要继续横向铺新 UI，而是按后端闭环优先级推进。
-
-### 第一优先级：权限系统闭环
-
-原因：
-
-- 这是参考项目里最关键的受控执行能力。
-- 当前 diff、工具执行、未来 Agent 自动修改，都依赖权限系统。
-- 没有这层，很多“会改代码”的能力都只能停留在演示状态。
-
-建议任务：
-
-1. 设计 `PermissionRequest`、待审批队列、会话级 registry。
-2. 接通前端 `PermissionDialog` 与 Java 后端。
-3. 把文件写入、命令执行、diff 应用动作统一接入权限判定。
-4. 增加会话级 decision memory。
-
-### 第二优先级：把历史系统升级为真实历史系统
-
-原因：
-
-- 当前历史更多是运行期索引，不是 provider-backed history。
-- 参考项目的历史能力不仅是 UI 列表，而是历史恢复、搜索、导出、转换、subagent 记录等体系。
-
-建议任务：
-
-1. 增加 Claude 历史读取器、parser、index service。
-2. 把当前 `HistoryIndexService` 从内存索引升级为“运行期索引 + provider 历史读取”双层模型。
-3. 补 `deep_search_history` 的真实实现。
-4. 评估是否引入 Codex 历史结构，避免后续重做。
-
-### 第三优先级：补齐 session / handler 分层
-
-原因：
-
-- 当前匿名消息 handler 过重，`ChatWindowDelegate` 仍承担过多接线职责。
-- 参考项目已经把会话、provider 路由、消息编排拆得更清楚。
-
-建议任务：
-
-1. 把用户消息处理从匿名 `MessageHandler` 提出为独立类。
-2. 引入 provider router / session orchestrator 概念。
-3. 为将来的 Codex 接入预留统一发送入口。
-
-### 第四优先级：接 Codex Provider
-
-原因：
-
-- 前端已经明显带有双 Provider 设计意图。
-- 当前后端如果不补上 Codex，很多 provider UI 只是摆设。
-
-建议任务：
-
-1. 新增 `provider/codex/*`
-2. 统一 `BaseSDKBridge` 之上的 Provider 生命周期接口
-3. 增加 Codex history / usage / model 配置对接
-
-### 第五优先级：MCP / Skill / Prompt 后端闭环
-
-原因：
-
-- 当前这块主要还是 UI 和 manager 骨架。
-- 一旦权限与 provider 主链稳住，这块会成为用户感知很强的差异化能力。
-
-建议任务：
-
-1. 先打通 MCP server 配置到 provider 调用链。
-2. 再补 slash command / skill registry。
-3. 最后做 prompt scope 与模板体系。
+- history provider 化
+- history 统一索引化
+- permission 子系统显性成形
 
 ---
 
-## 建议的下一阶段里程碑
+## 下一阶段建议
 
-### 里程碑 1：受控执行版 Claude-only Agent
+### 第一优先级：把 Claude history provider 做深，而不是只做“有”
 
-目标：
+建议顺序：
 
-- Claude 主链稳定
-- 权限系统打通
-- Diff 审批与写入闭环
-- 历史恢复基础版可用
+1. 给 `ClaudeHistoryIndexService` 增加缓存与索引持久化。
+2. 补增量扫描，避免每次全量扫盘。
+3. 补真实 `deep_search_history`。
+4. 增加 usage / stats 聚合能力。
 
-完成标准：
+原因：
 
-- 用户可以在 Tool Window 里安全地让 AI 读取、提议修改、查看 diff、确认应用
-- 历史会话可以真实恢复，而不只是前端显示
+- 当前已经有 history 主骨架。
+- 继续做深，收益明显高于重新铺一层新 UI。
 
-### 里程碑 2：参考项目核心能力补齐
+### 第二优先级：把 permission 真正接到执行闭环
 
-目标：
+建议顺序：
 
-- 完整历史系统
-- 更清晰的 session / handler 分层
-- 配置体系扩展
-- MCP / Prompt 后端可用
+1. 盘点文件写入、命令执行、diff 应用入口。
+2. 把这些入口统一接到 permission 判定。
+3. 做前端 dialog 生命周期与超时兜底回归。
+4. 补决策记忆策略。
 
-完成标准：
+原因：
 
-- 当前项目在 Claude 路线上接近 `jetbrains-cc-gui` 的核心使用体验
+- 当前 permission 已经有模块，不再需要从零搭目录。
+- 下一步重点是“接线闭环”，不是“继续造类型”。
 
-### 里程碑 3：双 Provider 产品化
+### 第三优先级：继续拆 session 中间层
 
-目标：
+建议顺序：
 
-- Codex Provider 接入
-- Provider 路由统一
-- Usage / quota / model 能力补齐
+1. 抽 provider router。
+2. 抽 message orchestrator。
+3. 补 replay merge / dedupe。
+4. 把当前窗口层和 session 层的粘连继续减薄。
 
-完成标准：
+原因：
 
-- 前端的多 Provider 设计与后端真实能力一致
+- 这是未来接 Codex 的前置条件。
+
+### 第四优先级：再决定是否引入 Codex provider
+
+当前更推荐的节奏不是马上大规模抄 `provider/codex/*`，而是：
+
+1. 先让当前 Claude history / permission / session 三层站稳。
+2. 再引入 Codex provider，避免刚接进来就被迫二次返工通用层。
 
 ---
 
-## 本次整理后的结论
+## 当前结论
 
-相对旧版文档，当前最需要修正的判断有三点：
+`ProteanCopilot` 现在最准确的描述，不再是“参考项目的简化壳子”，而是：
 
-1. `HistoryHandler` 不再是桩，已经有一批真实 history service，但仍不是完整历史系统。
-2. `StreamMessageCoalescer` 不再是桩，已经有真实节流和心跳逻辑。
-3. `SettingsService` 不再是“多数硬编码默认值”，已经基于 `PropertiesComponent` 做了基础持久化。
+- 已经有参考项目式的主要目录分层
+- 已经完成 Claude 主链
+- 已经把 history 从内存列表推进到 provider-backed 第一阶段
+- 已经把 permission 从占位推进到第一轮可接线子系统
 
-当前项目最准确的定位是：
+但距离 `jetbrains-cc-gui` 仍然有三条明显差距线：
 
-**一个已经完成 Claude 聊天主链、正在补齐 IDE Agent 基础设施、目标对齐 `jetbrains-cc-gui` 的 IntelliJ 插件。**
+1. `Codex / 多 Provider` 还没开始。
+2. `history / permission / session` 都还没做到参考项目那种完整深度。
+3. `skill / MCP / prompt / service` 体系还没有真正闭环。
 
-它现在最缺的不是更多页面，而是：
+因此接下来的开发策略应该是：
 
-- 权限系统
-- 真实历史系统
-- 多 Provider 后端
-- MCP / Skill / Prompt 后端闭环
+- 少铺新壳
+- 多做现有骨架的纵深闭环
+- 优先把 `history + permission + session` 做扎实
 

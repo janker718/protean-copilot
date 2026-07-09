@@ -6,6 +6,8 @@ public record SessionIndexEntry(
     String provider,
     String workingDirectory,
     long updatedAt,
+    int messageCount,
+    long fileSize,
     boolean favorited,
     long favoritedAt,
     String customTitle,

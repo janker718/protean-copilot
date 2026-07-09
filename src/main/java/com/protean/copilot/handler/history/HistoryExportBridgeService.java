@@ -1,13 +1,21 @@
 package com.protean.copilot.handler.history;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.diagnostic.Logger;
 import com.protean.copilot.handler.core.HandlerContext;
 import com.protean.copilot.history.HistoryExportService;
+import com.protean.copilot.history.HistoryIndexService;
+import com.protean.copilot.provider.claude.ClaudeHistoryReader;
 import com.protean.copilot.session.ChatSession;
+import com.protean.copilot.session.MessageParser;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Exports the currently active session through the existing webview callback.
@@ -18,6 +26,7 @@ public final class HistoryExportBridgeService {
 
     private final HandlerContext context;
     private final Gson gson = new Gson();
+    private final MessageParser messageParser = new MessageParser();
 
     public HistoryExportBridgeService(@NotNull HandlerContext context) {
         this.context = context;
@@ -30,12 +39,26 @@ public final class HistoryExportBridgeService {
             String title = payload.has("title") ? payload.get("title").getAsString() : "session";
 
             ChatSession session = findCurrentSession();
-            if (session == null || sessionId == null || !sessionId.equals(session.getSessionId())) {
-                context.callJavaScript("addErrorMessage", "Export currently supports the active session only.");
+            if (sessionId == null) {
+                context.callJavaScript("addErrorMessage", "Missing sessionId for export.");
                 return;
             }
 
-            String markdown = HistoryExportService.getInstance(context.project).exportAsMarkdown(session);
+            String markdown;
+            if (session != null && sessionId.equals(session.getSessionId())) {
+                markdown = HistoryExportService.getInstance(context.project).exportAsMarkdown(session);
+            } else {
+                String preferredProjectPath = session != null ? session.getCwd() : context.project.getBasePath();
+                String projectPath = preferredProjectPath;
+                var entry = HistoryIndexService.getInstance(context.project).getEntry(sessionId, preferredProjectPath, "claude");
+                if (entry != null && entry.workingDirectory() != null && !entry.workingDirectory().isBlank()) {
+                    projectPath = entry.workingDirectory();
+                }
+                String rawJson = new ClaudeHistoryReader().getSessionMessagesAsJson(projectPath, sessionId);
+                markdown = HistoryExportService.getInstance(context.project)
+                    .exportAsMarkdown(sessionId, parseHistoryMessages(rawJson));
+            }
+
             JsonObject exportData = new JsonObject();
             exportData.addProperty("sessionId", sessionId);
             exportData.addProperty("title", title);
@@ -52,5 +75,25 @@ public final class HistoryExportBridgeService {
 
     private ChatSession findCurrentSession() {
         return context.getSession();
+    }
+
+    private List<ChatSession.Message> parseHistoryMessages(String rawJson) {
+        List<ChatSession.Message> messages = new ArrayList<>();
+        JsonElement parsed = JsonParser.parseString(rawJson);
+        if (!parsed.isJsonArray()) {
+            return messages;
+        }
+
+        JsonArray items = parsed.getAsJsonArray();
+        for (JsonElement element : items) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            ChatSession.Message parsedMessage = messageParser.parseServerMessage(element.getAsJsonObject());
+            if (parsedMessage != null) {
+                messages.add(parsedMessage);
+            }
+        }
+        return messages;
     }
 }

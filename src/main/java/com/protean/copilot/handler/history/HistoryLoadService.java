@@ -9,7 +9,6 @@ import com.protean.copilot.history.HistoryIndexService;
 import org.jetbrains.annotations.NotNull;
 
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -26,22 +25,36 @@ public final class HistoryLoadService {
 
     public void handleLoadHistoryData(String providerFilter) {
         String normalizedProvider = normalize(providerFilter);
+        if (normalizedProvider != null && !"claude".equals(normalizedProvider)) {
+            JsonObject payload = new JsonObject();
+            payload.addProperty("success", true);
+            payload.add("sessions", new JsonArray());
+            payload.addProperty("total", 0);
+            context.executeJavaScriptOnEDT(
+                "window.setHistoryData && window.setHistoryData(" + gson.toJson(payload) + ");"
+            );
+            return;
+        }
+
+        String projectPath = context.getSession() != null
+            ? context.getSession().getCwd()
+            : context.project.getBasePath();
         List<SessionIndexEntry> entries = HistoryIndexService.getInstance(context.project)
-            .listEntries()
-            .stream()
-            .filter(entry -> normalizedProvider == null || normalizedProvider.equals(normalize(entry.provider())))
-            .sorted(Comparator.comparingLong(SessionIndexEntry::updatedAt).reversed())
-            .toList();
+            .listEntries(projectPath, normalizedProvider);
 
         JsonArray sessions = new JsonArray();
+        int totalMessages = 0;
         for (SessionIndexEntry entry : entries) {
             sessions.add(toHistorySessionSummary(entry));
+            totalMessages += Math.max(0, entry.messageCount());
         }
 
         JsonObject payload = new JsonObject();
         payload.addProperty("success", true);
         payload.add("sessions", sessions);
-        payload.addProperty("total", entries.size());
+        payload.addProperty("currentProject", projectPath);
+        payload.addProperty("total", totalMessages);
+        payload.addProperty("sessionCount", entries.size());
 
         context.executeJavaScriptOnEDT(
             "window.setHistoryData && window.setHistoryData(" + gson.toJson(payload) + ");"
@@ -60,10 +73,11 @@ public final class HistoryLoadService {
                 ? "Untitled session"
                 : entry.summary())
             : entry.customTitle());
-        session.addProperty("messageCount", 1);
+        session.addProperty("messageCount", Math.max(entry.messageCount(), 0));
         session.addProperty("lastTimestamp", Instant.ofEpochMilli(entry.updatedAt()).toString());
         session.addProperty("provider", normalize(entry.provider()) == null ? "claude" : normalize(entry.provider()));
         session.addProperty("isFavorited", entry.favorited());
+        session.addProperty("fileSize", Math.max(entry.fileSize(), 0L));
         if (entry.favoritedAt() > 0) {
             session.addProperty("favoritedAt", entry.favoritedAt());
         }

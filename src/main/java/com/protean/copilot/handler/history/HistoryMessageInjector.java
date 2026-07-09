@@ -42,15 +42,17 @@ public final class HistoryMessageInjector {
                 return;
             }
 
-            SessionIndexEntry entry = HistoryIndexService.getInstance(context.project).getEntry(sessionId);
-            if (entry == null) {
-                context.callJavaScript("historyLoadComplete");
-                context.callJavaScript("addErrorMessage", "History session not found: " + sessionId);
-                return;
-            }
+            String preferredProjectPath = context.getSession() != null
+                ? context.getSession().getCwd()
+                : context.project.getBasePath();
+            SessionIndexEntry entry = HistoryIndexService.getInstance(context.project)
+                .getEntry(sessionId, preferredProjectPath, provider);
+            String projectPath = entry != null
+                ? entry.workingDirectory()
+                : preferredProjectPath;
 
             LOG.info("[HistoryHandler] Loading history session: " + sessionId + ", provider=" + provider);
-            sessionLifecycleManager.loadHistorySession(sessionId, entry.workingDirectory());
+            sessionLifecycleManager.loadHistorySession(sessionId, projectPath);
         } catch (Exception ex) {
             LOG.warn("Failed to load history session: " + ex.getMessage(), ex);
             context.callJavaScript("historyLoadComplete");

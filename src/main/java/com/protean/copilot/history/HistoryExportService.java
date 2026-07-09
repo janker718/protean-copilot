@@ -13,9 +13,13 @@ public final class HistoryExportService {
     }
 
     public @NotNull String exportAsMarkdown(@NotNull ChatSession session) {
+        return exportAsMarkdown(session.ensureSessionId(), session.getMessages());
+    }
+
+    public @NotNull String exportAsMarkdown(@NotNull String sessionId, @NotNull java.util.List<ChatSession.Message> messages) {
         StringBuilder builder = new StringBuilder();
-        builder.append("# Session ").append(session.ensureSessionId()).append("\n\n");
-        for (ChatSession.Message message : session.getMessages()) {
+        builder.append("# Session ").append(sessionId).append("\n\n");
+        for (ChatSession.Message message : messages) {
             builder.append("## ").append(message.type.name()).append("\n\n");
             builder.append(message.content == null ? "" : message.content).append("\n\n");
         }

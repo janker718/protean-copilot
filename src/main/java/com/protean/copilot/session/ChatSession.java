@@ -260,6 +260,16 @@ public class ChatSession {
         }
     }
 
+    public void replaceMessages(List<Message> newMessages) {
+        synchronized (messages) {
+            messages.clear();
+            if (newMessages != null) {
+                messages.addAll(newMessages);
+            }
+        }
+        updateLastModifiedTime();
+    }
+
     public void updateLastModifiedTime() {
         this.lastModifiedTime = System.currentTimeMillis();
     }
