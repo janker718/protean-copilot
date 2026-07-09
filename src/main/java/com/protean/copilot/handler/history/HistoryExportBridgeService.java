@@ -10,6 +10,7 @@ import com.protean.copilot.handler.core.HandlerContext;
 import com.protean.copilot.history.HistoryExportService;
 import com.protean.copilot.history.HistoryIndexService;
 import com.protean.copilot.provider.claude.ClaudeHistoryReader;
+import com.protean.copilot.provider.codex.CodexHistoryReader;
 import com.protean.copilot.session.ChatSession;
 import com.protean.copilot.session.MessageParser;
 import org.jetbrains.annotations.NotNull;
@@ -49,12 +50,14 @@ public final class HistoryExportBridgeService {
                 markdown = HistoryExportService.getInstance(context.project).exportAsMarkdown(session);
             } else {
                 String preferredProjectPath = session != null ? session.getCwd() : context.project.getBasePath();
+                String preferredProvider = payload.has("provider") ? payload.get("provider").getAsString() : null;
                 String projectPath = preferredProjectPath;
-                var entry = HistoryIndexService.getInstance(context.project).getEntry(sessionId, preferredProjectPath, "claude");
+                var entry = HistoryIndexService.getInstance(context.project).getEntry(sessionId, preferredProjectPath, preferredProvider);
                 if (entry != null && entry.workingDirectory() != null && !entry.workingDirectory().isBlank()) {
                     projectPath = entry.workingDirectory();
                 }
-                String rawJson = new ClaudeHistoryReader().getSessionMessagesAsJson(projectPath, sessionId);
+                String provider = entry != null ? entry.provider() : preferredProvider;
+                String rawJson = loadHistoryMessages(provider, projectPath, sessionId);
                 markdown = HistoryExportService.getInstance(context.project)
                     .exportAsMarkdown(sessionId, parseHistoryMessages(rawJson));
             }
@@ -75,6 +78,14 @@ public final class HistoryExportBridgeService {
 
     private ChatSession findCurrentSession() {
         return context.getSession();
+    }
+
+    private String loadHistoryMessages(String provider, String projectPath, String sessionId) {
+        String normalized = provider == null || provider.isBlank() ? "claude" : provider.trim();
+        if ("codex".equalsIgnoreCase(normalized)) {
+            return new CodexHistoryReader().getSessionMessagesAsJson(sessionId, projectPath);
+        }
+        return new ClaudeHistoryReader().getSessionMessagesAsJson(projectPath, sessionId);
     }
 
     private List<ChatSession.Message> parseHistoryMessages(String rawJson) {

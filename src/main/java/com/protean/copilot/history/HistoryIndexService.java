@@ -5,6 +5,7 @@ import com.intellij.openapi.project.Project;
 import com.protean.copilot.cache.SessionIndexCache;
 import com.protean.copilot.cache.SessionIndexEntry;
 import com.protean.copilot.provider.claude.ClaudeHistorySource;
+import com.protean.copilot.provider.codex.CodexHistorySource;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -30,7 +31,10 @@ public final class HistoryIndexService {
 
     public HistoryIndexService(Project project) {
         this.project = project;
-        this.providerHistorySources = List.of(new ClaudeHistorySource());
+        this.providerHistorySources = List.of(
+            new ClaudeHistorySource(),
+            new CodexHistorySource()
+        );
     }
 
     public @NotNull Collection<SessionIndexEntry> listEntries() {

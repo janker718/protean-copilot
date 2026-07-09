@@ -20,7 +20,10 @@ public class SessionProviderRouter implements SessionMessageOrchestrator.Session
     private final Map<String, SessionProviderAdapter> adaptersByProvider;
 
     public SessionProviderRouter(SdkBridge sdkBridge) {
-        this(List.of(new ClaudeSessionProviderAdapter(sdkBridge.getClaudeBridge())));
+        this(List.of(
+            new ClaudeSessionProviderAdapter(sdkBridge.getClaudeBridge()),
+            new CodexSessionProviderAdapter(sdkBridge.getCodexBridge())
+        ));
     }
 
     SessionProviderRouter(List<SessionProviderAdapter> adapters) {

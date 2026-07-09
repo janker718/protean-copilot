@@ -8,6 +8,7 @@ import com.protean.copilot.handler.PermissionHandler;
 import com.protean.copilot.history.HistoryMetadataService;
 import com.protean.copilot.permission.PermissionService;
 import com.protean.copilot.provider.claude.ClaudeSDKBridge;
+import com.protean.copilot.provider.codex.CodexSDKBridge;
 import com.protean.copilot.session.*;
 import com.protean.copilot.settings.SettingsService;
 import com.protean.copilot.settings.TabStateService;
@@ -126,6 +127,16 @@ public class ProteanChatWindow {
         });
         sdkBridge.setClaudeBridge(claudeBridge);
 
+        CodexSDKBridge codexBridge = new CodexSDKBridge();
+        codexBridge.setCallback((functionName, args) -> {
+            ChatSession currentSession = session;
+            if (currentSession != null && currentSession.handleBridgeEvent(functionName, args)) {
+                return;
+            }
+            ProteanChatWindow.this.callJavaScript(functionName, args);
+        });
+        sdkBridge.setCodexBridge(codexBridge);
+
         // 异步启动 Node.js 桥接进程（避免阻塞 EDT 和构造函数）
         // 基类 BaseSDKBridge 通过 getBridgeScriptResource() 自动提取脚本
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
@@ -150,6 +161,16 @@ public class ProteanChatWindow {
                     callJavaScript("addErrorMessage",
                         "启动 Claude SDK 桥接失败: " + e.getMessage());
                 });
+            }
+        });
+
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            try {
+                String nodePath = settingsService.getNodePath();
+                codexBridge.start(nodePath);
+                LOG.info("Codex SDK 桥接启动成功");
+            } catch (Exception e) {
+                LOG.warn("启动 Codex SDK 桥接失败: " + e.getMessage(), e);
             }
         });
 

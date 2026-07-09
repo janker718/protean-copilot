@@ -68,10 +68,10 @@ public final class HistoryHandler extends BaseMessageHandler {
                 historyMessageInjector.handleLoadSession(content, currentProvider);
                 return true;
             case "delete_session":
-                historyDeleteService.handleDeleteSession(content);
+                historyDeleteService.handleDeleteSession(content, currentProvider);
                 return true;
             case "delete_sessions":
-                historyDeleteService.handleDeleteSessions(content);
+                historyDeleteService.handleDeleteSessions(content, currentProvider);
                 return true;
             case "export_session":
                 historyExportService.handleExportSession(content);

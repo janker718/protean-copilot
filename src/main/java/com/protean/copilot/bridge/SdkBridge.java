@@ -2,6 +2,7 @@ package com.protean.copilot.bridge;
 
 import com.google.gson.JsonObject;
 import com.protean.copilot.provider.claude.ClaudeSDKBridge;
+import com.protean.copilot.provider.codex.CodexSDKBridge;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.List;
  * <p>当前支持的提供商：
  * <ul>
  *   <li><b>Claude</b> — 通过 {@link ClaudeSDKBridge} 对接 npm claude-code-sdk</li>
+ *   <li><b>Codex</b> — 通过 {@link CodexSDKBridge} 对接 Codex 运行时桥接</li>
  * </ul>
  */
 public class SdkBridge {
@@ -38,6 +40,8 @@ public class SdkBridge {
 
     /** Claude SDK 桥接实例 */
     private volatile ClaudeSDKBridge claudeBridge;
+    /** Codex SDK 桥接实例 */
+    private volatile CodexSDKBridge codexBridge;
 
     /**
      * 设置 Claude SDK 桥接实例。
@@ -58,6 +62,14 @@ public class SdkBridge {
         return claudeBridge;
     }
 
+    public void setCodexBridge(CodexSDKBridge bridge) {
+        this.codexBridge = bridge;
+    }
+
+    public CodexSDKBridge getCodexBridge() {
+        return codexBridge;
+    }
+
     /**
      * 获取活跃的 SDK 进程数量。
      *
@@ -66,6 +78,9 @@ public class SdkBridge {
     public int getActiveProcessCount() {
         int count = 0;
         if (claudeBridge != null && claudeBridge.isRunning()) {
+            count++;
+        }
+        if (codexBridge != null && codexBridge.isRunning()) {
             count++;
         }
         return count;
@@ -78,6 +93,9 @@ public class SdkBridge {
     public void cleanupAllProcesses() {
         if (claudeBridge != null) {
             claudeBridge.shutdown();
+        }
+        if (codexBridge != null) {
+            codexBridge.shutdown();
         }
     }
 
@@ -107,6 +125,9 @@ public class SdkBridge {
     public String getProvider() {
         if (claudeBridge != null && claudeBridge.isRunning()) {
             return "claude";
+        }
+        if (codexBridge != null && codexBridge.isRunning()) {
+            return "codex";
         }
         return "protean";
     }

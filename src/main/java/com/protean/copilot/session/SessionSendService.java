@@ -2,6 +2,7 @@ package com.protean.copilot.session;
 
 import com.protean.copilot.bridge.SdkBridge;
 import com.protean.copilot.provider.claude.ClaudeSDKBridge;
+import com.protean.copilot.provider.codex.CodexSDKBridge;
 import com.protean.copilot.settings.SettingsService;
 import com.protean.copilot.settings.manager.WorkingDirectoryManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -14,7 +15,7 @@ import java.util.concurrent.CompletableFuture;
  * 负责消息发送编排，使 ChatSession 保持为轻量级会话门面。
  *
  * <p>代码结构参考 cc-gui 的 SessionSendService，
- * 当前仅落实现有仓库已接通的 Claude/Protean provider 链路。</p>
+ * 当前落地 Claude 与 Codex 的统一发送入口。</p>
  */
 public class SessionSendService {
 
@@ -78,6 +79,9 @@ public class SessionSendService {
 
         if ("claude".equals(currentProvider)) {
             return sendToClaude(session, input, effectivePermissionMode, normalizedRequestedEffort);
+        }
+        if ("codex".equals(currentProvider)) {
+            return sendToCodex(session, input, effectivePermissionMode, normalizedRequestedEffort);
         }
 
         return CompletableFuture.failedFuture(
@@ -165,6 +169,29 @@ public class SessionSendService {
         if (bridge == null || !bridge.isRunning()) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Claude SDK bridge is not running")
+            );
+        }
+
+        return bridge.query(
+            session.getSessionId(),
+            input != null ? input : "",
+            session.getCwd(),
+            session.getModel(),
+            effectivePermissionMode,
+            requestedReasoningEffort != null ? requestedReasoningEffort : session.getReasoningEffort()
+        );
+    }
+
+    private CompletableFuture<Void> sendToCodex(
+        ChatSession session,
+        String input,
+        String effectivePermissionMode,
+        String requestedReasoningEffort
+    ) {
+        CodexSDKBridge bridge = sdkBridge.getCodexBridge();
+        if (bridge == null || !bridge.isRunning()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Codex SDK bridge is not running")
             );
         }
 

@@ -25,17 +25,6 @@ public final class HistoryLoadService {
 
     public void handleLoadHistoryData(String providerFilter) {
         String normalizedProvider = normalize(providerFilter);
-        if (normalizedProvider != null && !"claude".equals(normalizedProvider)) {
-            JsonObject payload = new JsonObject();
-            payload.addProperty("success", true);
-            payload.add("sessions", new JsonArray());
-            payload.addProperty("total", 0);
-            context.executeJavaScriptOnEDT(
-                "window.setHistoryData && window.setHistoryData(" + gson.toJson(payload) + ");"
-            );
-            return;
-        }
-
         String projectPath = context.getSession() != null
             ? context.getSession().getCwd()
             : context.project.getBasePath();
