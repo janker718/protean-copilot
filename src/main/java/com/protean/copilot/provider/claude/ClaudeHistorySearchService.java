@@ -22,16 +22,26 @@ class ClaudeHistorySearchService {
 
     private final Path projectsDir;
     private final ClaudeHistoryIndexService indexService;
+    private final ClaudeUsageAggregator usageAggregator;
     private final Gson gson = new Gson();
 
-    ClaudeHistorySearchService(Path projectsDir, ClaudeHistoryIndexService indexService) {
+    ClaudeHistorySearchService(
+        Path projectsDir,
+        ClaudeHistoryIndexService indexService,
+        ClaudeUsageAggregator usageAggregator
+    ) {
         this.projectsDir = projectsDir;
         this.indexService = indexService;
+        this.usageAggregator = usageAggregator;
     }
 
     String getProjectDataAsJson(String projectPath) {
+        return getProjectDataAsJson(projectPath, false);
+    }
+
+    String getProjectDataAsJson(String projectPath, boolean forceRefresh) {
         try {
-            List<ClaudeHistoryReader.SessionInfo> sessions = indexService.readProjectSessions(projectPath);
+            List<ClaudeHistoryReader.SessionInfo> sessions = indexService.readProjectSessions(projectPath, forceRefresh);
             int totalMessages = sessions.stream().mapToInt(session -> session.messageCount).sum();
 
             Map<String, Object> result = new HashMap<>();
@@ -43,6 +53,16 @@ class ClaudeHistorySearchService {
             return gson.toJson(result);
         } catch (Exception e) {
             return gson.toJson(ClaudeHistoryReader.ApiResponse.error("Failed to read project data: " + e.getMessage()));
+        }
+    }
+
+    String getProjectStatisticsAsJson(String projectPath, long cutoffTime) {
+        try {
+            return gson.toJson(ClaudeHistoryReader.ApiResponse.success(
+                usageAggregator.getProjectStatistics(projectPath, cutoffTime)
+            ));
+        } catch (Exception e) {
+            return gson.toJson(ClaudeHistoryReader.ApiResponse.error("Failed to aggregate project statistics: " + e.getMessage()));
         }
     }
 

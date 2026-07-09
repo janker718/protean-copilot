@@ -70,11 +70,11 @@ public class PermissionService {
     private final Path permissionDir;
     private final String sessionId;
     private final Gson gson = new Gson();
-    private final PermissionManager permissionManager = new PermissionManager();
     private volatile long lastActivityTime = System.currentTimeMillis();
     private volatile PermissionDecisionListener decisionListener;
 
     private final PermissionDecisionStore decisionStore;
+    private final PermissionManager permissionManager;
     private final PermissionDialogRouter dialogRouter;
     private final PermissionFileProtocol fileProtocol;
     private final PermissionRequestWatcher requestWatcher;
@@ -93,6 +93,7 @@ public class PermissionService {
             LOG.error("Failed to create permission dir", e);
         }
         this.decisionStore = new PermissionDecisionStore();
+        this.permissionManager = new PermissionManager(decisionStore);
         this.dialogRouter = new PermissionDialogRouter((tag, message) -> LOG.debug("[" + tag + "] " + message));
         this.fileProtocol = new PermissionFileProtocol(permissionDir, sessionId, gson, (tag, message) -> LOG.debug("[" + tag + "] " + message));
         this.requestWatcher = new PermissionRequestWatcher(permissionDir, sessionId, fileProtocol, (tag, message) -> LOG.debug("[" + tag + "] " + message));
@@ -383,25 +384,19 @@ public class PermissionService {
             String toolName = request.get("toolName").getAsString();
             JsonObject inputs = request.get("inputs").getAsJsonObject();
 
-            PermissionResponse toolDecision = decisionStore.getToolDecision(toolName);
-            if (toolDecision != null) {
-                boolean allow = toolDecision != PermissionResponse.DENY;
+            PermissionResponse rememberedDecision = decisionStore.getParameterDecision(toolName, inputs);
+            if (rememberedDecision == null) {
+                rememberedDecision = decisionStore.getToolDecision(toolName);
+            }
+            if (rememberedDecision != null) {
+                boolean allow = rememberedDecision.isAllow();
                 fileProtocol.writePermissionResponse(requestId, allow);
-                notifyDecision(toolName, inputs, toolDecision);
+                notifyDecision(toolName, inputs, rememberedDecision);
                 safeDeleteFile(requestFile);
                 return;
             }
 
             if (DiffReviewService.isFileModifyingTool(toolName) && tryDiffReview(request, requestFile, fileName, requestId, toolName, inputs)) {
-                return;
-            }
-
-            PermissionResponse remembered = decisionStore.getParameterDecision(toolName, inputs);
-            if (remembered != null) {
-                boolean allow = remembered != PermissionResponse.DENY;
-                fileProtocol.writePermissionResponse(requestId, allow);
-                notifyDecision(toolName, inputs, remembered);
-                safeDeleteFile(requestFile);
                 return;
             }
 
@@ -427,7 +422,7 @@ public class PermissionService {
                 PermissionResponse decision = resolveDecision(response);
                 boolean allow = decision.isAllow();
                 if (decision == PermissionResponse.ALLOW_ALWAYS) {
-                    decisionStore.rememberToolDecision(toolName, PermissionResponse.ALLOW_ALWAYS);
+                    decisionStore.rememberParameterDecision(toolName, inputs, PermissionResponse.ALLOW_ALWAYS);
                 }
                 notifyDecision(toolName, inputs, decision);
                 fileProtocol.writePermissionResponse(requestId, allow);

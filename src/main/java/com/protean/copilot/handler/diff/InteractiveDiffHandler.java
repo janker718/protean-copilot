@@ -101,8 +101,14 @@ public class InteractiveDiffHandler {
             InteractiveDiffManager.showInteractiveDiff(project, req)
                 .thenAccept(result -> {
                     if (result.isApplied()) {
-                        fileOps.writeContentToFile(filePath, result.getFinalContent());
-                        bridge.sendDiffResult(filePath, "APPLY", result.getFinalContent(), null);
+                        String toolName = isNewFile ? "Write" : "Edit";
+                        fileOps.applyDiffChangeWithPermission(toolName, filePath, result.getFinalContent())
+                            .thenAccept(allowed -> bridge.sendDiffResult(
+                                filePath,
+                                allowed ? "APPLY" : "REJECT",
+                                allowed ? result.getFinalContent() : null,
+                                allowed ? null : "Permission denied"
+                            ));
                     } else if (result.isRejected()) {
                         bridge.sendDiffResult(filePath, "REJECT", null, null);
                     } else {

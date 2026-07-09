@@ -24,20 +24,9 @@ public class ToolInterceptor {
 
     private static final Logger LOG = Logger.getInstance(ToolInterceptor.class);
     private final Project project;
-    private final Set<String> controlledTools;
 
     public ToolInterceptor(Project project) {
         this.project = project;
-        this.controlledTools = new HashSet<>(Arrays.asList(
-            "Write",
-            "Edit",
-            "Delete",
-            "Bash",
-            "ExecuteCommand",
-            "CreateDirectory",
-            "MoveFile",
-            "CopyFile"
-        ));
     }
 
     public boolean needsPermission(String message) {
@@ -99,7 +88,7 @@ public class ToolInterceptor {
         if (service == null) {
             return showLegacyDetailedPermissionDialog(toolName, inputs);
         }
-        return service.requestLocalPermission(toolName, payload, null, project)
+        return PermissionGateways.resolve(project, service).requestPermission(toolName, payload, null, project)
             .thenApply(result -> result != null
                 && result.getBehavior() == PermissionRequest.PermissionResult.Behavior.ALLOW);
     }
@@ -137,7 +126,7 @@ public class ToolInterceptor {
                             JsonObject contentItem = element.getAsJsonObject();
                             if (contentItem.has("type") && "tool_use".equals(contentItem.get("type").getAsString())) {
                                 String toolName = contentItem.get("name").getAsString();
-                                if (!controlledTools.contains(toolName)) {
+                                if (!PermissionToolCatalog.isControlledTool(toolName)) {
                                     continue;
                                 }
                                 JsonObject inputs = contentItem.getAsJsonObject("input");

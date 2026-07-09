@@ -7,6 +7,8 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.protean.copilot.handler.core.HandlerContext;
 import com.protean.copilot.permission.PermissionRequest;
+import com.protean.copilot.permission.PermissionGateway;
+import com.protean.copilot.permission.PermissionGateways;
 import com.protean.copilot.permission.PermissionService;
 import com.protean.copilot.util.WslPathUtil;
 
@@ -83,16 +85,9 @@ public class DiffFileOperations {
         inputs.addProperty("file_path", filePath);
         inputs.addProperty("content", content);
 
-        PermissionService permissionService = context.getPermissionService();
-        CompletableFuture<PermissionRequest.PermissionResult> permissionFuture = permissionService != null
-            ? permissionService.requestLocalPermission(toolName, inputs, null, context.getProject())
-            : CompletableFuture.completedFuture(new PermissionRequest.PermissionResult(
-                PermissionRequest.PermissionResult.Behavior.ALLOW,
-                null,
-                null,
-                null,
-                false
-            ));
+        PermissionGateway permissionGateway = PermissionGateways.resolve(context.getProject(), context.getPermissionService());
+        CompletableFuture<PermissionRequest.PermissionResult> permissionFuture =
+            permissionGateway.requestPermission(toolName, inputs, null, context.getProject());
 
         return permissionFuture.thenApply(result -> {
             boolean allowed = result != null && result.getBehavior() == PermissionRequest.PermissionResult.Behavior.ALLOW;

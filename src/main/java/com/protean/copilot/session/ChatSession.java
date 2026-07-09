@@ -3,8 +3,6 @@ package com.protean.copilot.session;
 import com.google.gson.JsonObject;
 import com.protean.copilot.bridge.SdkBridge;
 import com.protean.copilot.history.HistoryMetadataService;
-import com.protean.copilot.provider.claude.ClaudeSDKBridge;
-import com.protean.copilot.settings.SettingsService;
 import com.protean.copilot.settings.manager.ProviderManager;
 import com.protean.copilot.settings.manager.WorkingDirectoryManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -68,6 +66,8 @@ public class ChatSession {
     private final Project project;
     private final SdkBridge sdkBridge;
     private final SessionSendService sendService;
+    private final SessionProviderRouter providerRouter;
+    private final SessionMessageOrchestrator messageOrchestrator;
 
     private final List<Message> messages = new ArrayList<>();
 
@@ -91,7 +91,14 @@ public class ChatSession {
     public ChatSession(Project project, SdkBridge sdkBridge) {
         this.project = project;
         this.sdkBridge = sdkBridge;
-        this.sendService = new SessionSendService(project, new SettingsService(), sdkBridge);
+        this.providerRouter = new SessionProviderRouter(sdkBridge);
+        this.sendService = new SessionSendService(project, sdkBridge);
+        this.messageOrchestrator = new SessionMessageOrchestrator(
+            this,
+            new MessageParser(),
+            providerRouter,
+            this::getCallback
+        );
         this.provider = ProviderManager.getInstance(project).getActiveProvider();
         this.cwd = WorkingDirectoryManager.getInstance(project).resolveWorkingDirectory();
     }
@@ -110,6 +117,14 @@ public class ChatSession {
 
     public void setCallback(SessionCallbackAdapter callback) {
         this.callback = callback;
+    }
+
+    public SessionProviderRouter getProviderRouter() {
+        return providerRouter;
+    }
+
+    public SessionMessageOrchestrator getMessageOrchestrator() {
+        return messageOrchestrator;
     }
 
     public String getSessionId() {
@@ -294,21 +309,14 @@ public class ChatSession {
      * 对齐 ClaudeSession 的会话启动入口。
      * 当前桥接没有独立 launchChannel API，因此这里只建立本地会话元数据。
      */
-    public CompletableFuture<String> launchClaude() {
-        ClaudeSDKBridge claudeBridge = sdkBridge.getClaudeBridge();
-        if (claudeBridge == null || !claudeBridge.isRunning()) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Claude SDK bridge is not running")
-            );
-        }
-        if (channelId != null && !channelId.isBlank()) {
-            return CompletableFuture.completedFuture(channelId);
-        }
-
-        channelId = UUID.randomUUID().toString();
+    public CompletableFuture<String> launchChannel() {
         error = null;
         ensureSessionId();
-        return CompletableFuture.completedFuture(channelId);
+        return providerRouter.launchChannel(provider, channelId, sessionId, cwd)
+            .thenApply(newChannelId -> {
+                channelId = newChannelId;
+                return newChannelId;
+            });
     }
 
     @Deprecated
@@ -368,7 +376,7 @@ public class ChatSession {
             }
         }
 
-        return launchClaude().thenCompose(chId ->
+        return launchChannel().thenCompose(chId ->
             sendService.sendMessageToProvider(
                 chId,
                 this,
@@ -419,19 +427,15 @@ public class ChatSession {
             return CompletableFuture.completedFuture(null);
         }
 
-        ClaudeSDKBridge claudeBridge = sdkBridge.getClaudeBridge();
-        if (claudeBridge != null && claudeBridge.isRunning() && sessionId != null) {
-            return claudeBridge.interrupt(sessionId).whenComplete((v, ex) -> {
-                busy = false;
-                loading = false;
-                if (ex == null) {
-                    error = null;
-                }
-                updateLastModifiedTime();
-                HistoryMetadataService.getInstance(project).updateFromSession(this);
-            });
-        }
-        return CompletableFuture.completedFuture(null);
+        return providerRouter.interruptChannel(provider, channelId, sessionId).whenComplete((v, ex) -> {
+            busy = false;
+            loading = false;
+            if (ex == null) {
+                error = null;
+            }
+            updateLastModifiedTime();
+            HistoryMetadataService.getInstance(project).updateFromSession(this);
+        });
     }
 
     /**
@@ -444,7 +448,7 @@ public class ChatSession {
             error = null;
             busy = false;
             loading = false;
-            return launchClaude().thenApply(chId -> null);
+            return launchChannel().thenApply(chId -> null);
         });
     }
 
@@ -453,6 +457,10 @@ public class ChatSession {
      * 当前仓库尚未有完整历史恢复能力，保留门面方法与 ClaudeSession 对齐。
      */
     public CompletableFuture<Void> loadFromServer() {
-        return CompletableFuture.completedFuture(null);
+        return messageOrchestrator.loadFromServer();
+    }
+
+    public boolean handleBridgeEvent(String functionName, String... args) {
+        return messageOrchestrator.handleBridgeEvent(functionName, args);
     }
 }

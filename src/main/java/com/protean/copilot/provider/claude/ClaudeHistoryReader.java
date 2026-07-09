@@ -41,13 +41,15 @@ public class ClaudeHistoryReader {
 
     private final Gson gson = new Gson();
     private final ClaudeHistoryIndexService indexService;
+    private final ClaudeUsageAggregator usageAggregator;
     private final ClaudeHistorySearchService searchService;
 
     public ClaudeHistoryReader() {
         Path projectsDir = projectsDir();
         ClaudeHistoryParser parser = new ClaudeHistoryParser();
         this.indexService = new ClaudeHistoryIndexService(projectsDir, parser);
-        this.searchService = new ClaudeHistorySearchService(projectsDir, indexService);
+        this.usageAggregator = new ClaudeUsageAggregator(projectsDir, parser);
+        this.searchService = new ClaudeHistorySearchService(projectsDir, indexService, usageAggregator);
     }
 
     public static class ConversationMessage {
@@ -65,6 +67,7 @@ public class ClaudeHistoryReader {
         public static class Message {
             public String role;
             public Object content;
+            public String model;
             public Usage usage;
         }
 
@@ -86,6 +89,73 @@ public class ClaudeHistoryReader {
         public String entrypoint;
     }
 
+    public static class UsageData {
+        public long inputTokens;
+        public long outputTokens;
+        public long cacheWriteTokens;
+        public long cacheReadTokens;
+        public long totalTokens;
+    }
+
+    public static class SessionSummary {
+        public String sessionId;
+        public long timestamp;
+        public String model;
+        public UsageData usage;
+        public double cost;
+        public String summary;
+    }
+
+    public static class DailyUsage {
+        public String date;
+        public int sessions;
+        public UsageData usage;
+        public double cost;
+        public List<String> modelsUsed;
+    }
+
+    public static class ModelUsage {
+        public String model;
+        public double totalCost;
+        public long totalTokens;
+        public long inputTokens;
+        public long outputTokens;
+        public long cacheCreationTokens;
+        public long cacheReadTokens;
+        public int sessionCount;
+    }
+
+    public static class WeeklyComparison {
+        public WeekData currentWeek;
+        public WeekData lastWeek;
+        public Trends trends;
+
+        public static class WeekData {
+            public int sessions;
+            public double cost;
+            public long tokens;
+        }
+
+        public static class Trends {
+            public double sessions;
+            public double cost;
+            public double tokens;
+        }
+    }
+
+    public static class ProjectStatistics {
+        public String projectPath;
+        public String projectName;
+        public int totalSessions;
+        public UsageData totalUsage;
+        public double estimatedCost;
+        public List<SessionSummary> sessions;
+        public List<DailyUsage> dailyUsage;
+        public WeeklyComparison weeklyComparison;
+        public List<ModelUsage> byModel;
+        public long lastUpdated;
+    }
+
     public static class ApiResponse {
         public boolean success;
         public String error;
@@ -97,11 +167,22 @@ public class ClaudeHistoryReader {
             response.error = message;
             return response;
         }
+
+        public static ApiResponse success(Object data) {
+            ApiResponse response = new ApiResponse();
+            response.success = true;
+            response.data = data;
+            return response;
+        }
     }
 
     public List<SessionInfo> readProjectSessions(String projectPath) {
+        return readProjectSessions(projectPath, false);
+    }
+
+    public List<SessionInfo> readProjectSessions(String projectPath, boolean forceRefresh) {
         try {
-            return indexService.readProjectSessions(projectPath);
+            return indexService.readProjectSessions(projectPath, forceRefresh);
         } catch (Exception e) {
             LOG.warn("Failed to read Claude project sessions: " + e.getMessage(), e);
             return List.of();
@@ -114,6 +195,14 @@ public class ClaudeHistoryReader {
 
     public String getSessionMessagesAsJson(String projectPath, String sessionId) {
         return searchService.getSessionMessagesAsJson(projectPath, sessionId);
+    }
+
+    public ProjectStatistics getProjectStatistics(String projectPath, long cutoffTime) {
+        return usageAggregator.getProjectStatistics(projectPath, cutoffTime);
+    }
+
+    public String getProjectStatisticsAsJson(String projectPath, long cutoffTime) {
+        return searchService.getProjectStatisticsAsJson(projectPath, cutoffTime);
     }
 
     public List<ConversationMessage> readSessionMessages(String projectPath, String sessionId) {

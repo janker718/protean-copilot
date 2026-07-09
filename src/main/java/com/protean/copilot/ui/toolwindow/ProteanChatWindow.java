@@ -117,6 +117,10 @@ public class ProteanChatWindow {
         claudeBridge.setCallback(new ClaudeSDKBridge.BridgeCallback() {
             @Override
             public void callJavaScript(String functionName, String... args) {
+                ChatSession currentSession = session;
+                if (currentSession != null && currentSession.handleBridgeEvent(functionName, args)) {
+                    return;
+                }
                 ProteanChatWindow.this.callJavaScript(functionName, args);
             }
         });
@@ -211,16 +215,13 @@ public class ProteanChatWindow {
             }
 
             @Override
-            public void setSession(ChatSession s) {
+            public void activateSession(ChatSession s) {
                 session = s;
-            }
-
-            @Override
-            public HandlerContext getHandlerContext() {
                 if (handlerContext == null) {
                     throw new IllegalStateException("HandlerContext not initialized");
                 }
-                return handlerContext;
+                handlerContext.setSession(s);
+                ProteanChatWindow.this.setupSessionCallbacks();
             }
 
             @Override
@@ -252,36 +253,11 @@ public class ProteanChatWindow {
             }
 
             @Override
-            public boolean isDisposed() {
-                return disposed;
-            }
-
-            @Override
-            public JBCefBrowser getBrowser() {
-                return browser;
-            }
-
-            @Override
-            public void setupSessionCallbacks() {
-                ProteanChatWindow.this.setupSessionCallbacks();
-            }
-
-            @Override
             public void invalidateSessionCallbacks() {
                 if (sessionCallbackAdapter != null) {
                     sessionCallbackAdapter.dispose();
                 }
                 sessionCallbackAdapter = null;
-            }
-
-            @Override
-            public void setSlashCommandsFetched(boolean fetched) {
-                slashCommandsFetched = fetched;
-            }
-
-            @Override
-            public void setFetchedSlashCommandsCount(int count) {
-                fetchedSlashCommandsCount = count;
             }
         });
 
@@ -609,15 +585,16 @@ public class ProteanChatWindow {
     public void restorePersistedTabSessionState(TabStateService.TabSessionState state, boolean loadImmediately) {
         if (state == null) return;
         if (state.sessionId() != null) {
+            sessionId = state.sessionId();
             session.setSessionInfo(state.sessionId(), state.cwd());
             if (loadImmediately) {
                 TabStateService.TabSessionState ss = state;
                 ApplicationManager.getApplication().invokeLater(() -> {
                     if (!disposed) {
-                        String sid = ss.sessionId();
-                        if (sid == null) return;
-                        String cwd = WorkingDirectoryManager.getInstance(project).resolveWorkingDirectory(ss.cwd());
-                        sessionLifecycleManager.loadHistorySession(sid, cwd);
+                        HistorySessionLoadRequest request = HistorySessionLoadRequest.fromTabState(ss);
+                        if (request != null) {
+                            sessionLifecycleManager.loadHistorySession(request);
+                        }
                     }
                 });
             }
@@ -632,13 +609,11 @@ public class ProteanChatWindow {
     }
 
     private void loadRestoredHistoryIfNeeded(TabStateService.TabSessionState state) {
-        if (state.sessionId() == null) return;
-        String sid = state.sessionId();
-        if (sid == null) return;
-        String cwd = WorkingDirectoryManager.getInstance(project).resolveWorkingDirectory(state.cwd());
+        HistorySessionLoadRequest request = HistorySessionLoadRequest.fromTabState(state);
+        if (request == null) return;
         ApplicationManager.getApplication().invokeLater(() -> {
             if (!disposed) {
-                sessionLifecycleManager.loadHistorySession(sid, cwd);
+                sessionLifecycleManager.loadHistorySession(request);
             }
         });
     }
@@ -780,13 +755,20 @@ public class ProteanChatWindow {
                 permissionHandler,
                 () -> slashCommandsFetched,
                 () -> onStreamEnded()
-            );
+            ) {
+                @Override
+                public void onSessionIdReceived(String newSessionId) {
+                    super.onSessionIdReceived(newSessionId);
+                    sessionId = newSessionId;
+                    persistTabSessionState();
+                }
+            };
         }
         session.setCallback(sessionCallbackAdapter);
     }
 
     private void onStreamEnded() {
-        LOG.info("Stream ended for session: " + sessionId);
+        LOG.info("Stream ended for session: " + session.getSessionId());
         streamCoalescer.resetStreamState();
         persistSessionMetadata();
     }
@@ -796,11 +778,11 @@ public class ProteanChatWindow {
     }
 
     private void registerSessionLoadListener() {
-        SessionLoadService.setListener((sid, path) -> {
+        SessionLoadService.setListener(request -> {
             if (!disposed) {
                 ApplicationManager.getApplication().invokeLater(() -> {
                     if (!disposed && restoredHistoryLoadStarted.compareAndSet(false, true)) {
-                        sessionLifecycleManager.loadHistorySession(sid, path);
+                        sessionLifecycleManager.loadHistorySession(request);
                     }
                 });
             }
@@ -834,7 +816,7 @@ public class ProteanChatWindow {
 
         TabStateService.TabSessionState state = new TabStateService.TabSessionState(
             session.getProvider(),
-            sessionId,
+            session.getSessionId(),
             session.getCwd(),
             session.getModel(),
             session.getPermissionMode(),

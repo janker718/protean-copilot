@@ -237,12 +237,16 @@ public class PermissionHandler extends BaseMessageHandler {
         pendingPermissionRequests.clear();
 
         for (Map.Entry<String, CompletableFuture<JsonObject>> entry : pendingAskUserQuestionRequests.entrySet()) {
-            entry.getValue().completeExceptionally(new IllegalStateException("Ask user question cancelled"));
+            entry.getValue().complete(new JsonObject());
         }
         pendingAskUserQuestionRequests.clear();
 
         for (Map.Entry<String, CompletableFuture<JsonObject>> entry : pendingPlanApprovalRequests.entrySet()) {
-            entry.getValue().completeExceptionally(new IllegalStateException("Plan approval cancelled"));
+            JsonObject response = new JsonObject();
+            response.addProperty("approved", false);
+            response.addProperty("targetMode", "default");
+            response.addProperty("message", "Session changed");
+            entry.getValue().complete(response);
         }
         pendingPlanApprovalRequests.clear();
     }

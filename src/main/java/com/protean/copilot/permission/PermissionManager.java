@@ -15,6 +15,8 @@ import java.util.function.Consumer;
  */
 public class PermissionManager {
 
+    private final PermissionDecisionStore decisionStore;
+
     public enum PermissionMode {
         DEFAULT,
         ACCEPT_EDITS,
@@ -24,9 +26,11 @@ public class PermissionManager {
 
     private PermissionMode mode = PermissionMode.DEFAULT;
     private final Map<String, PermissionRequest> pendingRequests = new ConcurrentHashMap<>();
-    private final Map<String, Boolean> toolPermissionMemory = new ConcurrentHashMap<>();
-    private final Map<String, Boolean> toolOnlyPermissionMemory = new ConcurrentHashMap<>();
     private Consumer<PermissionRequest> onPermissionRequestedCallback;
+
+    public PermissionManager(PermissionDecisionStore decisionStore) {
+        this.decisionStore = decisionStore;
+    }
 
     public PermissionRequest createRequest(
         String channelId,
@@ -35,9 +39,10 @@ public class PermissionManager {
         JsonObject suggestions,
         Project project
     ) {
-        if (toolOnlyPermissionMemory.containsKey(toolName)) {
+        PermissionService.PermissionResponse toolDecision = decisionStore.getToolDecision(toolName);
+        if (toolDecision != null) {
             PermissionRequest request = new PermissionRequest(channelId, toolName, inputs, suggestions, project);
-            if (Boolean.TRUE.equals(toolOnlyPermissionMemory.get(toolName))) {
+            if (toolDecision.isAllow()) {
                 request.accept();
             } else {
                 request.reject("Previously denied by user", true);
@@ -45,10 +50,10 @@ public class PermissionManager {
             return request;
         }
 
-        String memoryKey = toolName + ":" + generateInputHash(inputs);
-        if (toolPermissionMemory.containsKey(memoryKey)) {
+        PermissionService.PermissionResponse parameterDecision = decisionStore.getParameterDecision(toolName, inputs);
+        if (parameterDecision != null) {
             PermissionRequest request = new PermissionRequest(channelId, toolName, inputs, suggestions, project);
-            if (Boolean.TRUE.equals(toolPermissionMemory.get(memoryKey))) {
+            if (parameterDecision.isAllow()) {
                 request.accept();
             } else {
                 request.reject("Previously denied by user", true);
@@ -89,9 +94,12 @@ public class PermissionManager {
         if (request == null || request.isResolved()) {
             return;
         }
-        if (rememberDecision) {
-            String memoryKey = request.getToolName() + ":" + generateInputHash(request.getInputs());
-            toolPermissionMemory.put(memoryKey, allow);
+        if (rememberDecision && allow) {
+            decisionStore.rememberParameterDecision(
+                request.getToolName(),
+                request.getInputs(),
+                PermissionService.PermissionResponse.ALLOW_ALWAYS
+            );
         }
         if (allow) {
             request.accept();
@@ -105,7 +113,15 @@ public class PermissionManager {
         if (request == null || request.isResolved()) {
             return;
         }
-        toolOnlyPermissionMemory.put(request.getToolName(), allow);
+        if (allow) {
+            decisionStore.rememberParameterDecision(
+                request.getToolName(),
+                request.getInputs(),
+                PermissionService.PermissionResponse.ALLOW_ALWAYS
+            );
+        } else {
+            decisionStore.rememberToolDecision(request.getToolName(), PermissionService.PermissionResponse.DENY);
+        }
         if (allow) {
             request.accept();
         } else {
@@ -126,13 +142,11 @@ public class PermissionManager {
     }
 
     public void clearPermissionMemory() {
-        toolPermissionMemory.clear();
-        toolOnlyPermissionMemory.clear();
+        decisionStore.clear();
     }
 
     public void clearToolPermissionMemory(String toolName) {
-        toolPermissionMemory.entrySet().removeIf(entry -> entry.getKey().startsWith(toolName + ":"));
-        toolOnlyPermissionMemory.remove(toolName);
+        decisionStore.clear();
     }
 
     public Collection<PermissionRequest> getPendingRequests() {
@@ -146,24 +160,11 @@ public class PermissionManager {
         pendingRequests.clear();
     }
 
-    private String generateInputHash(Map<String, Object> inputs) {
-        if (inputs == null || inputs.isEmpty()) {
-            return "empty";
-        }
-        return String.valueOf(inputs.toString().hashCode());
-    }
-
     private boolean isAutoApprovedInAcceptEditsMode(String toolName, Map<String, Object> inputs, Project project) {
         if (toolName == null || toolName.isEmpty()) {
             return false;
         }
-        boolean isEditTool = "Write".equals(toolName)
-            || "Edit".equals(toolName)
-            || "MultiEdit".equals(toolName)
-            || "CreateDirectory".equals(toolName)
-            || "MoveFile".equals(toolName)
-            || "CopyFile".equals(toolName)
-            || "Rename".equals(toolName);
+        boolean isEditTool = PermissionToolCatalog.isAcceptEditsEligible(toolName);
         if (!isEditTool || project == null || inputs == null) {
             return false;
         }

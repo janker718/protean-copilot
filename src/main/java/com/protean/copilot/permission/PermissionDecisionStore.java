@@ -29,8 +29,20 @@ class PermissionDecisionStore {
         return PermissionService.PermissionResponse.fromValue(remembered);
     }
 
+    PermissionService.PermissionResponse getParameterDecision(String toolName, Map<String, Object> inputs) {
+        Integer remembered = parameterDecisionMemory.get(buildMemoryKey(toolName, inputs));
+        if (remembered == null) {
+            return null;
+        }
+        return PermissionService.PermissionResponse.fromValue(remembered);
+    }
+
     String buildMemoryKey(String toolName, JsonObject inputs) {
-        return toolName + ":" + (inputs != null ? inputs.toString() : "null");
+        return toolName + ":" + PermissionToolCatalog.normalizeInputs(toolName, inputs);
+    }
+
+    String buildMemoryKey(String toolName, Map<String, Object> inputs) {
+        return toolName + ":" + PermissionToolCatalog.normalizeInputs(toolName, inputs);
     }
 
     void rememberToolDecision(String toolName, PermissionService.PermissionResponse decision) {
@@ -45,6 +57,13 @@ class PermissionDecisionStore {
     }
 
     void rememberParameterDecision(String toolName, JsonObject inputs, PermissionService.PermissionResponse decision) {
+        if (toolName == null || decision == null) {
+            return;
+        }
+        parameterDecisionMemory.put(buildMemoryKey(toolName, inputs), decision.getValue());
+    }
+
+    void rememberParameterDecision(String toolName, Map<String, Object> inputs, PermissionService.PermissionResponse decision) {
         if (toolName == null || decision == null) {
             return;
         }

@@ -6,6 +6,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.protean.copilot.cache.SessionIndexEntry;
 import com.protean.copilot.handler.core.HandlerContext;
 import com.protean.copilot.history.HistoryIndexService;
+import com.protean.copilot.session.HistorySessionLoadRequest;
 import com.protean.copilot.session.SessionLifecycleManager;
 import org.jetbrains.annotations.NotNull;
 
@@ -52,7 +53,7 @@ public final class HistoryMessageInjector {
                 : preferredProjectPath;
 
             LOG.info("[HistoryHandler] Loading history session: " + sessionId + ", provider=" + provider);
-            sessionLifecycleManager.loadHistorySession(sessionId, projectPath);
+            sessionLifecycleManager.loadHistorySession(HistorySessionLoadRequest.of(sessionId, projectPath, provider));
         } catch (Exception ex) {
             LOG.warn("Failed to load history session: " + ex.getMessage(), ex);
             context.callJavaScript("historyLoadComplete");

@@ -18,7 +18,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -27,10 +26,8 @@ import java.util.concurrent.CompletableFuture;
 public class DiffReviewService {
 
     private static final Logger LOG = Logger.getInstance(DiffReviewService.class);
-    private static final Set<String> FILE_MODIFYING_TOOLS = Set.of("Edit", "Write");
-
     public static boolean isFileModifyingTool(@Nullable String toolName) {
-        return toolName != null && FILE_MODIFYING_TOOLS.contains(toolName);
+        return PermissionToolCatalog.supportsDiffReview(toolName);
     }
 
     @Nullable

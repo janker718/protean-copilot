@@ -1,9 +1,20 @@
 import { act, renderHook } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useDialogManagement } from './useDialogManagement';
+
+const sendBridgeEvent = vi.fn();
+
+vi.mock('../utils/bridge', () => ({
+  sendBridgeEvent: (...args: unknown[]) => sendBridgeEvent(...args),
+}));
 
 const t = ((key: string) => key) as any;
 
 describe('useDialogManagement - context usage requestId isolation', () => {
+  beforeEach(() => {
+    sendBridgeEvent.mockReset();
+  });
+
   it('openContextUsageDialog sets requestId and opens dialog', () => {
     const { result } = renderHook(() => useDialogManagement({ t }));
 
@@ -128,5 +139,104 @@ describe('useDialogManagement - context usage requestId isolation', () => {
 
     expect(closed!).toBe(true);
     expect(result.current.contextUsageDialogOpen).toBe(false);
+  });
+});
+
+describe('useDialogManagement - dialog queue lifecycle', () => {
+  beforeEach(() => {
+    sendBridgeEvent.mockReset();
+  });
+
+  it('shows the next permission request after the current request is denied', () => {
+    const { result } = renderHook(() => useDialogManagement({ t }));
+
+    act(() => {
+      result.current.openPermissionDialog({
+        channelId: 'perm-1',
+        toolName: 'Write',
+        inputs: { file_path: '/tmp/a.txt' },
+      });
+      result.current.openPermissionDialog({
+        channelId: 'perm-2',
+        toolName: 'Write',
+        inputs: { file_path: '/tmp/b.txt' },
+      });
+    });
+
+    expect(result.current.permissionDialogOpen).toBe(true);
+    expect(result.current.currentPermissionRequest?.channelId).toBe('perm-1');
+
+    act(() => {
+      result.current.handlePermissionSkip('perm-1');
+    });
+
+    expect(sendBridgeEvent).toHaveBeenCalledWith(
+      'permission_decision',
+      expect.stringContaining('"channelId":"perm-1"'),
+    );
+    expect(result.current.permissionDialogOpen).toBe(true);
+    expect(result.current.currentPermissionRequest?.channelId).toBe('perm-2');
+  });
+
+  it('shows the next plan approval request after the current request is rejected', () => {
+    const { result } = renderHook(() => useDialogManagement({ t }));
+
+    act(() => {
+      result.current.openPlanApprovalDialog({
+        requestId: 'plan-1',
+        toolName: 'ExitPlanMode',
+        plan: 'first plan',
+      });
+      result.current.openPlanApprovalDialog({
+        requestId: 'plan-2',
+        toolName: 'ExitPlanMode',
+        plan: 'second plan',
+      });
+    });
+
+    expect(result.current.planApprovalDialogOpen).toBe(true);
+    expect(result.current.currentPlanApprovalRequest?.requestId).toBe('plan-1');
+
+    act(() => {
+      result.current.handlePlanApprovalReject('plan-1');
+    });
+
+    expect(sendBridgeEvent).toHaveBeenCalledWith(
+      'plan_approval_response',
+      expect.stringContaining('"requestId":"plan-1"'),
+    );
+    expect(result.current.planApprovalDialogOpen).toBe(true);
+    expect(result.current.currentPlanApprovalRequest?.requestId).toBe('plan-2');
+  });
+
+  it('shows the next ask-user request after the current request is cancelled', () => {
+    const { result } = renderHook(() => useDialogManagement({ t }));
+
+    act(() => {
+      result.current.openAskUserQuestionDialog({
+        requestId: 'ask-1',
+        toolName: 'AskUserQuestion',
+        questions: [],
+      });
+      result.current.openAskUserQuestionDialog({
+        requestId: 'ask-2',
+        toolName: 'AskUserQuestion',
+        questions: [],
+      });
+    });
+
+    expect(result.current.askUserQuestionDialogOpen).toBe(true);
+    expect(result.current.currentAskUserQuestionRequest?.requestId).toBe('ask-1');
+
+    act(() => {
+      result.current.handleAskUserQuestionCancel('ask-1');
+    });
+
+    expect(sendBridgeEvent).toHaveBeenCalledWith(
+      'ask_user_question_response',
+      expect.stringContaining('"requestId":"ask-1"'),
+    );
+    expect(result.current.askUserQuestionDialogOpen).toBe(true);
+    expect(result.current.currentAskUserQuestionRequest?.requestId).toBe('ask-2');
   });
 });

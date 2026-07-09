@@ -167,17 +167,25 @@
 - [ChatSession.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/ChatSession.java)
 - [SessionSendService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionSendService.java)
 - [SessionLifecycleManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionLifecycleManager.java)
+- [SessionProviderRouter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionProviderRouter.java)
+- [SessionMessageOrchestrator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionMessageOrchestrator.java)
+- [ReplayDeduplicator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/ReplayDeduplicator.java)
+- [MessageMerger.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/MessageMerger.java)
 - [SessionCallbackAdapter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionCallbackAdapter.java)
 - [StreamMessageCoalescer.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/StreamMessageCoalescer.java)
 - [MessageParser.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/MessageParser.java)
 
-和参考项目相比，当前 session 层已经具备“发送、回调、聚合、恢复”的基本链路，但还没有进一步拆到：
+和参考项目相比，当前 session 层已经具备“发送、回调、聚合、恢复”的基本链路，并且已经完成第一轮中间层拆分：
 
-- `SessionProviderRouter`
-- `SessionMessageOrchestrator`
-- `ReplayDeduplicator`
-- `MessageMerger`
-- Claude/Codex 分治消息处理器
+- provider 路由已从 `ChatSession` 中抽到 `SessionProviderRouter`
+- provider 历史加载和桥事件编排已抽到 `SessionMessageOrchestrator`
+- replay merge / dedupe 已落到 `MessageMerger` 与 `ReplayDeduplicator`
+
+当前主要差距变成：
+
+- 仍然只有 Claude adapter，Codex adapter 尚未引入
+- 窗口层与 session 生命周期之间仍有直接耦合
+- provider 特定消息处理器还未进一步分治
 
 判断：
 
@@ -284,27 +292,31 @@
 - `provider/claude/*`
 - `provider/codex/*`
 
-当前项目只有 `provider/claude/*` 和少量 `provider/common/*`，没有：
+当前项目只有 `provider/claude/*` 和少量 `provider/common/*`，没有完整的：
 
 - `CodexSDKBridge`
 - Codex history
 - Codex usage / session service
-- provider 路由层
+- Codex provider adapter / router 实现
 
 这决定了当前项目仍然是 Claude-only。
 
 ### 3. session 子模块拆分还不够深
 
-参考项目的 session 侧比当前项目更细，典型缺口包括：
+参考项目的 session 侧比当前项目更细。当前已经补上：
 
 - `SessionProviderRouter`
 - `SessionMessageOrchestrator`
-- `SessionState`
-- `CallbackHandler`
 - `MessageMerger`
 - `ReplayDeduplicator`
+
+但仍有缺口：
+
+- `SessionState`
+- `CallbackHandler`
 - `ClaudeMessageHandler`
 - `CodexMessageHandler`
+- 更彻底的 window/session 解耦边界
 
 当前项目能跑，但还没有把会话主链沉淀成足够稳定、可扩展的中间层。
 
@@ -381,44 +393,76 @@
 
 ### 第一优先级：把 Claude history provider 做深，而不是只做“有”
 
-建议顺序：
+该优先级本轮已补齐，当前完成项：
 
-1. 给 `ClaudeHistoryIndexService` 增加缓存与索引持久化。
-2. 补增量扫描，避免每次全量扫盘。
-3. 补真实 `deep_search_history`。
-4. 增加 usage / stats 聚合能力。
+1. `ClaudeHistoryIndexService` 已增加 provider 级持久化索引，新增 [ClaudeHistoryIndexStore.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/cache/ClaudeHistoryIndexStore.java)。
+2. 已补增量扫描，按 `fileLastModified + fileSize + fileRelativePath` 复用旧索引，必要时才重读 session 文件。
+3. `deep_search_history` 已改为强制刷新路径，不再只是普通 reload。
+4. 已增加 usage / stats 聚合，新增 [ClaudeUsageAggregator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeUsageAggregator.java)，并通过 [ClaudeHistoryReader.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeHistoryReader.java) / [ClaudeHistorySearchService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeHistorySearchService.java) 暴露。
+5. `HistoryIndexService` 已调整为更干净的双层模型：运行期 `SessionIndexCache` 不再被 provider 历史回灌污染。
 
-原因：
+已验证：
 
-- 当前已经有 history 主骨架。
-- 继续做深，收益明显高于重新铺一层新 UI。
+- `./gradlew -PskipWebview=true test`
+
+补充说明：
+
+- 当前 usage 聚合仍是 Claude-only，且按 session 最终识别出的 model 聚合，不是把单个 session 内多模型 assistant block 再拆桶。
+- 这已经覆盖当前文档里第一优先级的未完成项，下一阶段应转到 permission 执行闭环。
 
 ### 第二优先级：把 permission 真正接到执行闭环
 
-建议顺序：
+该优先级本轮已完成第一阶段收口，当前完成项：
 
-1. 盘点文件写入、命令执行、diff 应用入口。
-2. 把这些入口统一接到 permission 判定。
-3. 做前端 dialog 生命周期与超时兜底回归。
-4. 补决策记忆策略。
+1. 已补权限入口盘点，并抽出统一目录 [PermissionToolCatalog.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionToolCatalog.java)：
+   - 文件写入入口：`DiffFileOperations.applyDiffChangeWithPermission(...)`
+   - 命令执行入口：`ToolInterceptor.showDetailedPermissionDialog(...) -> PermissionService.requestLocalPermission(...)`
+   - provider/file-protocol 入口：`PermissionService.handlePermissionRequest(...)`
+   - diff 应用入口：`EditableDiffHandler`、`InteractiveDiffHandler`
+2. 已把这些入口统一接到 permission 判定：
+   - [ToolInterceptor.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/ToolInterceptor.java) 不再维护一份散落的 tool 白名单，改由 `PermissionToolCatalog` 判定。
+   - [DiffReviewService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/DiffReviewService.java) 也改为复用同一 catalog。
+   - [InteractiveDiffHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/diff/InteractiveDiffHandler.java) 已修正，apply 不再直写文件，而是回到 `DiffFileOperations.applyDiffChangeWithPermission(...)`。
+3. 已补前端 dialog 生命周期与超时回归：
+   - [PermissionDialog.test.tsx](/Users/janker/Documents/ProteanCopilot/webview/src/components/PermissionDialog.test.tsx) 新增“切换到新 request 后重置倒计时，并把超时回调落到新 channelId”测试。
+   - [useDialogManagement.context.test.ts](/Users/janker/Documents/ProteanCopilot/webview/src/hooks/useDialogManagement.context.test.ts) 新增 permission / ask-user / plan-approval 三类队列切换测试，验证当前请求关闭后下一个请求能正确顶上。
+   - [PermissionHandlerTest.java](/Users/janker/Documents/ProteanCopilot/src/test/java/com/protean/copilot/handler/PermissionHandlerTest.java) 新增 session 切换时的 default-deny / empty-answer / reject fallback 测试。
+4. 已补决策记忆策略：
+   - [PermissionDecisionStore.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionDecisionStore.java) 改为基于 `PermissionToolCatalog.normalizeInputs(...)` 生成记忆 key。
+   - 文件类权限记忆按目标路径归一，不再把 `content` 作为 key 组成部分。
+   - 命令类权限记忆按 `command + cwd/working_directory` 归一。
+   - [PermissionManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionManager.java) 已接入同一 `PermissionDecisionStore`，去掉独立内存记忆表。
 
-原因：
+已新增验证：
 
-- 当前 permission 已经有模块，不再需要从零搭目录。
-- 下一步重点是“接线闭环”，不是“继续造类型”。
+- [PermissionDecisionStoreTest.java](/Users/janker/Documents/ProteanCopilot/src/test/java/com/protean/copilot/permission/PermissionDecisionStoreTest.java)
+- [PermissionHandlerTest.java](/Users/janker/Documents/ProteanCopilot/src/test/java/com/protean/copilot/handler/PermissionHandlerTest.java)
+- [PermissionDialog.test.tsx](/Users/janker/Documents/ProteanCopilot/webview/src/components/PermissionDialog.test.tsx)
+- [useDialogManagement.context.test.ts](/Users/janker/Documents/ProteanCopilot/webview/src/hooks/useDialogManagement.context.test.ts)
 
-### 第三优先级：继续拆 session 中间层
+当前剩余注意点：
 
-建议顺序：
+- `PermissionManager.clearToolPermissionMemory(String toolName)` 目前仍是保守实现，调用后会清空整份 decision store，而不是按 tool 精确删除。
+- 这不影响当前 permission 闭环，但如果后续要做“单工具级别清理记忆”，还需要把 store 的删除粒度继续细化。
 
-1. 抽 provider router。
-2. 抽 message orchestrator。
-3. 补 replay merge / dedupe。
-4. 把当前窗口层和 session 层的粘连继续减薄。
+### 第三优先级：继续加固 session 通用层
 
-原因：
+该优先级当前已完成第一阶段，新增完成项：
 
-- 这是未来接 Codex 的前置条件。
+1. 已抽 provider router，新增 [SessionProviderRouter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionProviderRouter.java) 与 [SessionProviderAdapter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionProviderAdapter.java)。
+2. 已抽 message orchestrator，新增 [SessionMessageOrchestrator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionMessageOrchestrator.java)。
+3. 已补 replay merge / dedupe，新增 [MessageMerger.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/MessageMerger.java) 与 [ReplayDeduplicator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/ReplayDeduplicator.java)。
+4. 已把 provider 历史读取接口化：
+   - [ProviderHistorySource.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/history/ProviderHistorySource.java)
+   - [ClaudeHistorySource.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeHistorySource.java)
+5. 已把 session provider 调用接口化：
+   - [ClaudeSessionProviderAdapter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/ClaudeSessionProviderAdapter.java)
+
+当前剩余重点：
+
+- 继续减薄 [ProteanChatWindow.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/ui/toolwindow/ProteanChatWindow.java) 与 [SessionLifecycleManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionLifecycleManager.java) 的粘连。
+- 让 history session 恢复完整依赖 `SessionMessageOrchestrator`，避免窗口层继续关心 provider 细节。
+- 在不引入 Codex provider 代码的前提下，把 adapter/router/orchestrator 的扩展点先稳定。
 
 ### 第四优先级：再决定是否引入 Codex provider
 
@@ -449,4 +493,3 @@
 - 少铺新壳
 - 多做现有骨架的纵深闭环
 - 优先把 `history + permission + session` 做扎实
-

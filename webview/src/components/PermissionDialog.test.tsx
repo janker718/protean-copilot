@@ -180,6 +180,60 @@ describe('PermissionDialog', () => {
     expect(onApproveAlways).not.toHaveBeenCalled();
   });
 
+  it('restarts the countdown for a new request and auto-denies the new channelId', () => {
+    vi.useFakeTimers();
+    const onApprove = vi.fn();
+    const onSkip = vi.fn();
+    const onApproveAlways = vi.fn();
+
+    const { rerender } = render(
+      <PermissionDialog
+        isOpen
+        request={buildRequest({ channelId: 'perm-1' })}
+        onApprove={onApprove}
+        onSkip={onSkip}
+        onApproveAlways={onApproveAlways}
+        timeoutSeconds={30}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(29_000);
+    });
+
+    rerender(
+      <PermissionDialog
+        isOpen
+        request={buildRequest({
+          channelId: 'perm-2',
+          inputs: {
+            cwd: 'src/permission',
+            command: 'cat PermissionService.java',
+          },
+        })}
+        onApprove={onApprove}
+        onSkip={onSkip}
+        onApproveAlways={onApproveAlways}
+        timeoutSeconds={10}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(9_000);
+    });
+
+    expect(onSkip).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(onSkip).toHaveBeenCalledTimes(1);
+    expect(onSkip).toHaveBeenCalledWith('perm-2');
+    expect(onApprove).not.toHaveBeenCalled();
+    expect(onApproveAlways).not.toHaveBeenCalled();
+  });
+
   // The dialog overlay sits above the chat input but the keydown listener is on
   // window, so without the editable-target guard a stray Enter in any input
   // (chat box, settings, etc.) would silently auto-approve the pending tool call.

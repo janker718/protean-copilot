@@ -37,9 +37,9 @@ public class SessionSendService {
     private final SettingsService settingsService;
     private final SdkBridge sdkBridge;
 
-    public SessionSendService(Project project, SettingsService settingsService, SdkBridge sdkBridge) {
+    public SessionSendService(Project project, SdkBridge sdkBridge) {
         this.project = project;
-        this.settingsService = settingsService;
+        this.settingsService = new SettingsService();
         this.sdkBridge = sdkBridge;
     }
 

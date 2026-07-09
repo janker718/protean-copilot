@@ -62,7 +62,30 @@ public final class HistoryLoadService {
     }
 
     public void handleDeepSearchHistory(String providerFilter) {
-        handleLoadHistoryData(providerFilter);
+        String normalizedProvider = normalize(providerFilter);
+        String projectPath = context.getSession() != null
+            ? context.getSession().getCwd()
+            : context.project.getBasePath();
+        List<SessionIndexEntry> entries = HistoryIndexService.getInstance(context.project)
+            .listEntries(projectPath, normalizedProvider, true);
+
+        JsonArray sessions = new JsonArray();
+        int totalMessages = 0;
+        for (SessionIndexEntry entry : entries) {
+            sessions.add(toHistorySessionSummary(entry));
+            totalMessages += Math.max(0, entry.messageCount());
+        }
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("success", true);
+        payload.add("sessions", sessions);
+        payload.addProperty("currentProject", projectPath);
+        payload.addProperty("total", totalMessages);
+        payload.addProperty("sessionCount", entries.size());
+
+        context.executeJavaScriptOnEDT(
+            "window.setHistoryData && window.setHistoryData(" + gson.toJson(payload) + ");"
+        );
     }
 
     private JsonObject toHistorySessionSummary(SessionIndexEntry entry) {

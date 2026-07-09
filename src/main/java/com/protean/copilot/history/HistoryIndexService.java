@@ -4,7 +4,7 @@ import com.intellij.openapi.components.Service;
 import com.intellij.openapi.project.Project;
 import com.protean.copilot.cache.SessionIndexCache;
 import com.protean.copilot.cache.SessionIndexEntry;
-import com.protean.copilot.provider.claude.ClaudeHistoryReader;
+import com.protean.copilot.provider.claude.ClaudeHistorySource;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -26,16 +26,26 @@ public final class HistoryIndexService {
     }
 
     private final Project project;
+    private final List<ProviderHistorySource> providerHistorySources;
 
     public HistoryIndexService(Project project) {
         this.project = project;
+        this.providerHistorySources = List.of(new ClaudeHistorySource());
     }
 
     public @NotNull Collection<SessionIndexEntry> listEntries() {
-        return listEntries(resolveProjectPath(null), null);
+        return listEntries(resolveProjectPath(null), null, false);
     }
 
     public @NotNull List<SessionIndexEntry> listEntries(@Nullable String projectPath, @Nullable String providerFilter) {
+        return listEntries(projectPath, providerFilter, false);
+    }
+
+    public @NotNull List<SessionIndexEntry> listEntries(
+        @Nullable String projectPath,
+        @Nullable String providerFilter,
+        boolean forceRefresh
+    ) {
         String normalizedProjectPath = resolveProjectPath(projectPath);
         String normalizedProvider = normalize(providerFilter);
         Map<String, SessionIndexEntry> merged = new LinkedHashMap<>();
@@ -46,8 +56,10 @@ public final class HistoryIndexService {
             }
         }
 
-        if (normalizedProvider == null || "claude".equals(normalizedProvider)) {
-            mergeClaudeHistoryEntries(merged, normalizedProjectPath);
+        for (ProviderHistorySource source : providerHistorySources) {
+            if (normalizedProvider == null || normalizedProvider.equals(normalize(source.providerId()))) {
+                mergeProviderEntries(merged, source, normalizedProjectPath, forceRefresh);
+            }
         }
 
         List<SessionIndexEntry> sorted = new ArrayList<>(merged.values());
@@ -90,57 +102,62 @@ public final class HistoryIndexService {
         SessionIndexCache.getInstance(project).remove(sessionId);
     }
 
-    private void mergeClaudeHistoryEntries(Map<String, SessionIndexEntry> merged, @Nullable String projectPath) {
+    private void mergeProviderEntries(
+        Map<String, SessionIndexEntry> merged,
+        @NotNull ProviderHistorySource source,
+        @Nullable String projectPath,
+        boolean forceRefresh
+    ) {
         if (projectPath == null) {
             return;
         }
 
-        ClaudeHistoryReader historyReader = new ClaudeHistoryReader();
-        for (ClaudeHistoryReader.SessionInfo session : historyReader.readProjectSessions(projectPath)) {
-            if (session == null || normalize(session.sessionId) == null) {
+        for (SessionIndexEntry providerEntry : source.listEntries(projectPath, forceRefresh)) {
+            if (providerEntry == null || normalize(providerEntry.sessionId()) == null) {
                 continue;
             }
 
-            SessionIndexEntry runtimeEntry = merged.get(session.sessionId);
-            SessionIndexEntry mergedEntry = mergeClaudeSession(runtimeEntry, session, projectPath);
+            SessionIndexEntry runtimeEntry = merged.get(providerEntry.sessionId());
+            SessionIndexEntry mergedEntry = mergeProviderEntry(runtimeEntry, providerEntry, projectPath, source.providerId());
             merged.put(mergedEntry.sessionId(), mergedEntry);
-            SessionIndexCache.getInstance(project).put(mergedEntry);
         }
     }
 
-    private SessionIndexEntry mergeClaudeSession(
+    private SessionIndexEntry mergeProviderEntry(
         @Nullable SessionIndexEntry runtimeEntry,
-        @NotNull ClaudeHistoryReader.SessionInfo session,
-        @NotNull String projectPath
+        @NotNull SessionIndexEntry providerEntry,
+        @NotNull String projectPath,
+        @NotNull String providerId
     ) {
         String summary = firstNonBlank(
             runtimeEntry != null ? runtimeEntry.summary() : null,
-            session.title,
+            providerEntry.summary(),
             "Untitled session"
         );
-        String provider = firstNonBlank(runtimeEntry != null ? runtimeEntry.provider() : null, "claude");
+        String provider = firstNonBlank(runtimeEntry != null ? runtimeEntry.provider() : null, providerEntry.provider(), providerId);
         String workingDirectory = firstNonBlank(
             runtimeEntry != null ? runtimeEntry.workingDirectory() : null,
+            providerEntry.workingDirectory(),
             projectPath
         );
-        long updatedAt = Math.max(session.lastTimestamp, runtimeEntry != null ? runtimeEntry.updatedAt() : 0L);
-        int messageCount = session.messageCount > 0
-            ? session.messageCount
+        long updatedAt = Math.max(providerEntry.updatedAt(), runtimeEntry != null ? runtimeEntry.updatedAt() : 0L);
+        int messageCount = providerEntry.messageCount() > 0
+            ? providerEntry.messageCount()
             : runtimeEntry != null ? runtimeEntry.messageCount() : 0;
-        long fileSize = session.fileSize > 0
-            ? session.fileSize
+        long fileSize = providerEntry.fileSize() > 0
+            ? providerEntry.fileSize()
             : runtimeEntry != null ? runtimeEntry.fileSize() : 0L;
         boolean favorited = runtimeEntry != null && runtimeEntry.favorited();
         long favoritedAt = runtimeEntry != null ? runtimeEntry.favoritedAt() : 0L;
         String customTitle = runtimeEntry != null ? runtimeEntry.customTitle() : null;
         String entrypoint = firstNonBlank(
             runtimeEntry != null ? runtimeEntry.entrypoint() : null,
-            session.entrypoint,
+            providerEntry.entrypoint(),
             "sdk-cli"
         );
 
         return new SessionIndexEntry(
-            session.sessionId,
+            providerEntry.sessionId(),
             summary,
             provider,
             workingDirectory,
