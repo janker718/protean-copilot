@@ -1,6 +1,9 @@
 package com.protean.copilot.session;
 
 import com.protean.copilot.handler.core.HandlerContext;
+import com.protean.copilot.history.HistoryMetadataService;
+import com.protean.copilot.settings.manager.ProviderManager;
+import com.protean.copilot.settings.manager.WorkingDirectoryManager;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -49,7 +52,7 @@ public class SessionLifecycleManager {
 
         ChatSession oldSession = host.getSession();
         String previousMode = oldSession.getPermissionMode();
-        String previousProvider = oldSession.getProvider();
+        String activeProvider = ProviderManager.getInstance(host.getProject()).getActiveProvider();
         String previousModel = oldSession.getModel();
 
         host.invalidateSessionCallbacks();
@@ -68,7 +71,7 @@ public class SessionLifecycleManager {
 
             ChatSession newSession = new ChatSession(host.getProject(), oldSession.getSdkBridge());
             newSession.setPermissionMode(previousMode);
-            newSession.setProvider(previousProvider);
+            newSession.setProvider(activeProvider);
             newSession.setModel(previousModel);
 
             completeNewSessionBootstrap(newSession);
@@ -84,15 +87,10 @@ public class SessionLifecycleManager {
 
     /**
      * 确定会话的工作目录。
-     * 默认为项目根路径。
+     * 统一通过 WorkingDirectoryManager 解析。
      */
     public String determineWorkingDirectory() {
-        String projectPath = host.getProject().getBasePath();
-        if (projectPath != null && new java.io.File(projectPath).exists()) {
-            return projectPath;
-        }
-        String userHome = System.getProperty("user.home");
-        return userHome != null ? userHome : ".";
+        return WorkingDirectoryManager.getInstance(host.getProject()).resolveWorkingDirectory();
     }
 
     /**
@@ -100,6 +98,11 @@ public class SessionLifecycleManager {
      */
     public void loadHistorySession(String sessionId, String projectPath) {
         LOG.info("Loading history session: " + sessionId + " from project: " + projectPath);
+        ChatSession session = host.getSession();
+        String resolvedWorkingDirectory = WorkingDirectoryManager.getInstance(host.getProject())
+            .resolveWorkingDirectory(projectPath);
+        session.setSessionInfo(sessionId, resolvedWorkingDirectory);
+        HistoryMetadataService.getInstance(host.getProject()).updateFromSession(session);
         // 存根：历史加载尚未实现
         ApplicationManager.getApplication().invokeLater(() -> {
             host.callJavaScript("historyLoadComplete");
@@ -115,6 +118,7 @@ public class SessionLifecycleManager {
 
         String workingDir = determineWorkingDirectory();
         newSession.setSessionInfo(null, workingDir);
+        HistoryMetadataService.getInstance(host.getProject()).updateFromSession(newSession);
         LOG.info("New session created successfully, working directory: " + workingDir);
 
         ApplicationManager.getApplication().invokeLater(() -> {

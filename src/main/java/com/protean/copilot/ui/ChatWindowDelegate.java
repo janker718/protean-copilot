@@ -7,12 +7,15 @@ import com.protean.copilot.handler.core.MessageHandler;
 import com.protean.copilot.handler.diff.DiffHandler;
 import com.protean.copilot.handler.HistoryHandler;
 import com.protean.copilot.handler.PermissionHandler;
+import com.protean.copilot.handler.SettingsHandler;
 import com.protean.copilot.permission.PermissionService;
 import com.protean.copilot.provider.claude.ClaudeSDKBridge;
 import com.protean.copilot.session.ChatSession;
 import com.protean.copilot.session.SessionLifecycleManager;
 import com.protean.copilot.session.StreamMessageCoalescer;
+import com.protean.copilot.settings.CodemossSettingsService;
 import com.protean.copilot.settings.SettingsService;
+import com.protean.copilot.settings.manager.ProviderManager;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonArray;
@@ -117,14 +120,21 @@ public class ChatWindowDelegate {
         );
         context.setSession(host.getSession());
         context.setBrowser(host.getBrowser());
+        context.setCurrentProvider(getProviderManager().getActiveProvider());
         handlerContext = context;
 
         // 创建权限和历史处理器
-        PermissionHandler permHandler = new PermissionHandler();
+        PermissionHandler permHandler = new PermissionHandler(context);
         permissionHandler = permHandler;
+        dispatcher.registerHandler(permHandler);
 
-        HistoryHandler histHandler = new HistoryHandler();
+        HistoryHandler histHandler = new HistoryHandler(
+            context,
+            host.getSessionLifecycleManager()
+        );
         historyHandler = histHandler;
+        dispatcher.registerHandler(histHandler);
+        dispatcher.registerHandler(new SettingsHandler(context));
 
         // 为用户消息注册处理器 —— 通过 ClaudeSDKBridge 转发到 claude-code-sdk
         dispatcher.registerHandler(new MessageHandler() {
@@ -173,7 +183,7 @@ public class ChatWindowDelegate {
                             // 获取会话信息
                             ChatSession session = context.getSession();
                             session.setModel(context.getCurrentModel());
-                            session.setProvider(context.getCurrentProvider());
+                            session.setProvider(getProviderManager().getActiveProvider());
 
                             session.send(
                                 text,
@@ -218,28 +228,6 @@ public class ChatWindowDelegate {
                         return true;
                     }
 
-                    // 切换 AI 提供商
-                    case "set_provider" -> {
-                        context.setCurrentProvider(content);
-                        ChatSession session = context.getSession();
-                        if (session != null) {
-                            session.setProvider(content);
-                        }
-                        LOG.info("提供商已切换: " + content);
-                        return true;
-                    }
-
-                    // 切换模型
-                    case "set_model" -> {
-                        context.setCurrentModel(content);
-                        ChatSession session = context.getSession();
-                        if (session != null) {
-                            session.setModel(content);
-                        }
-                        LOG.info("模型已切换: " + content);
-                        return true;
-                    }
-
                     default -> { return false; }
                 }
             }
@@ -247,7 +235,7 @@ public class ChatWindowDelegate {
             @Override
             public List<String> getSupportedTypes() {
                 return List.of("send_message", "user_message", "send_message_with_attachments",
-                    "interrupt_session", "set_provider", "set_model");
+                    "interrupt_session");
             }
         });
 
@@ -283,7 +271,18 @@ public class ChatWindowDelegate {
     public String setupPermissionService() {
         String sessionId = UUID.randomUUID().toString();
         try {
-            PermissionService.getInstance(host.getProject(), sessionId);
+            PermissionService permissionService = PermissionService.getInstance(host.getProject(), sessionId);
+            context.setPermissionService(permissionService);
+            permissionService.setPermissionMode(host.getSettingsService().getPermissionMode());
+            if (permissionHandler != null) {
+                permissionHandler.bindPermissionService(permissionService);
+                permissionService.setOnPermissionRequestedCallback(permissionHandler::showPermissionDialog);
+                permissionService.registerDialogShower(host.getProject(), permissionHandler::showFrontendPermissionDialog);
+                permissionService.registerAskUserQuestionDialogShower(host.getProject(), permissionHandler::showAskUserQuestionDialog);
+                permissionService.registerPlanApprovalDialogShower(host.getProject(), permissionHandler::showPlanApprovalDialog);
+                permissionService.setLastActiveProject(host.getProject());
+            }
+            permissionService.start();
             LOG.info("PermissionService created for session: " + sessionId);
         } catch (Exception e) {
             LOG.warn("Failed to create PermissionService: " + e.getMessage());
@@ -297,6 +296,9 @@ public class ChatWindowDelegate {
     public void loadPermissionModeFromSettings() {
         String mode = host.getSettingsService().getPermissionMode();
         host.getSession().setPermissionMode(mode);
+        if (handlerContext != null && handlerContext.getPermissionService() != null) {
+            handlerContext.getPermissionService().setPermissionMode(mode);
+        }
         LOG.info("Permission mode loaded: " + mode);
     }
 
@@ -311,9 +313,16 @@ public class ChatWindowDelegate {
      * 从设置中同步当前使用的提供商。
      */
     public void syncActiveProvider() {
-        String provider = host.getSettingsService().getProvider();
+        String provider = getProviderManager().getActiveProvider();
+        if (handlerContext != null) {
+            handlerContext.setCurrentProvider(provider);
+        }
         host.getSession().setProvider(provider);
         LOG.info("Active provider synced: " + provider);
+    }
+
+    private ProviderManager getProviderManager() {
+        return ProviderManager.getInstance(host.getProject());
     }
 
     /**

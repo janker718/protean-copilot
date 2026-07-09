@@ -5,11 +5,13 @@ import com.protean.copilot.handler.core.HandlerContext;
 import com.protean.copilot.handler.core.MessageDispatcher;
 import com.protean.copilot.handler.HistoryHandler;
 import com.protean.copilot.handler.PermissionHandler;
+import com.protean.copilot.history.HistoryMetadataService;
 import com.protean.copilot.permission.PermissionService;
 import com.protean.copilot.provider.claude.ClaudeSDKBridge;
 import com.protean.copilot.session.*;
 import com.protean.copilot.settings.SettingsService;
 import com.protean.copilot.settings.TabStateService;
+import com.protean.copilot.settings.manager.WorkingDirectoryManager;
 import com.protean.copilot.ui.*;
 import com.protean.copilot.util.HtmlLoader;
 import com.protean.copilot.util.JsUtils;
@@ -22,6 +24,8 @@ import com.intellij.ui.jcef.JBCefBrowser;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -44,6 +48,7 @@ import java.util.regex.Pattern;
 public class ProteanChatWindow {
 
     private static final Logger LOG = Logger.getInstance(ProteanChatWindow.class);
+    private static final Map<Project, ProteanChatWindow> WINDOWS_BY_PROJECT = new ConcurrentHashMap<>();
 
     // ===== 核心依赖 =====
 
@@ -99,6 +104,7 @@ public class ProteanChatWindow {
 
     public ProteanChatWindow(Project project, boolean skipRegister) {
         this.project = project;
+        WINDOWS_BY_PROJECT.put(project, this);
         this.mainPanel = new JPanel(new BorderLayout());
         this.sdkBridge = new SdkBridge();
         this.settingsService = new SettingsService();
@@ -192,23 +198,7 @@ public class ProteanChatWindow {
         chatWindowDelegate.loadNodePathFromSettings();
         chatWindowDelegate.syncActiveProvider();
 
-        // 5. 初始化处理器
-        chatWindowDelegate.initializeHandlers();
-        handlerContext = chatWindowDelegate.getHandlerContext();
-        messageDispatcher = chatWindowDelegate.getMessageDispatcher();
-        permissionHandler = chatWindowDelegate.getPermissionHandler();
-        historyHandler = chatWindowDelegate.getHistoryHandler();
-
-        // 在处理器上下文上设置浏览器和会话
-        if (handlerContext != null) {
-            handlerContext.setBrowser(browser);
-            handlerContext.setSession(session);
-        }
-
-        // 6. 设置权限服务
-        sessionId = chatWindowDelegate.setupPermissionService();
-
-        // 7. 使用内联 SessionHost 创建 SessionLifecycleManager
+        // 5. 使用内联 SessionHost 创建 SessionLifecycleManager
         sessionLifecycleManager = new SessionLifecycleManager(new SessionLifecycleManager.SessionHost() {
             @Override
             public Project getProject() {
@@ -291,6 +281,22 @@ public class ProteanChatWindow {
                 fetchedSlashCommandsCount = count;
             }
         });
+
+        // 6. 初始化处理器
+        chatWindowDelegate.initializeHandlers();
+        handlerContext = chatWindowDelegate.getHandlerContext();
+        messageDispatcher = chatWindowDelegate.getMessageDispatcher();
+        permissionHandler = chatWindowDelegate.getPermissionHandler();
+        historyHandler = chatWindowDelegate.getHistoryHandler();
+
+        // 在处理器上下文上设置浏览器和会话
+        if (handlerContext != null) {
+            handlerContext.setBrowser(browser);
+            handlerContext.setSession(session);
+        }
+
+        // 7. 设置权限服务
+        sessionId = chatWindowDelegate.setupPermissionService();
 
         // 8. 创建 EditorContextTracker
         editorContextTracker = new EditorContextTracker(
@@ -607,7 +613,7 @@ public class ProteanChatWindow {
                     if (!disposed) {
                         String sid = ss.sessionId();
                         if (sid == null) return;
-                        String cwd = ss.cwd() != null ? ss.cwd() : (project.getBasePath() != null ? project.getBasePath() : "");
+                        String cwd = WorkingDirectoryManager.getInstance(project).resolveWorkingDirectory(ss.cwd());
                         sessionLifecycleManager.loadHistorySession(sid, cwd);
                     }
                 });
@@ -626,7 +632,7 @@ public class ProteanChatWindow {
         if (state.sessionId() == null) return;
         String sid = state.sessionId();
         if (sid == null) return;
-        String cwd = state.cwd() != null ? state.cwd() : (project.getBasePath() != null ? project.getBasePath() : "");
+        String cwd = WorkingDirectoryManager.getInstance(project).resolveWorkingDirectory(state.cwd());
         ApplicationManager.getApplication().invokeLater(() -> {
             if (!disposed) {
                 sessionLifecycleManager.loadHistorySession(sid, cwd);
@@ -654,6 +660,10 @@ public class ProteanChatWindow {
         if (handlerContext != null) {
             handlerContext.executeJavaScriptOnEDT(jsCode);
         }
+    }
+
+    public static ProteanChatWindow getChatWindow(Project project) {
+        return project != null ? WINDOWS_BY_PROJECT.get(project) : null;
     }
 
     public void focusInputPane() {
@@ -775,13 +785,11 @@ public class ProteanChatWindow {
     private void onStreamEnded() {
         LOG.info("Stream ended for session: " + sessionId);
         streamCoalescer.resetStreamState();
+        persistSessionMetadata();
     }
 
     private void initializeSessionInfo() {
-        String basePath = project.getBasePath();
-        if (basePath != null) {
-            session.setSessionInfo(null, basePath);
-        }
+        session.setSessionInfo(null, WorkingDirectoryManager.getInstance(project).resolveWorkingDirectory());
     }
 
     private void registerSessionLoadListener() {
@@ -832,6 +840,14 @@ public class ProteanChatWindow {
         TabStateService.getInstance(project).saveTabSessionState(tabIndex, state);
     }
 
+    private void persistSessionMetadata() {
+        if (session == null) {
+            return;
+        }
+        HistoryMetadataService.getInstance(project).updateFromSession(session);
+        persistTabSessionState();
+    }
+
     private void addCodeSnippet(String selectionInfo) {
         callJavaScript("addCodeSnippet", JsUtils.escapeJs(selectionInfo));
     }
@@ -848,6 +864,7 @@ public class ProteanChatWindow {
     public synchronized void dispose() {
         if (disposed) return;
         disposed = true;
+        WINDOWS_BY_PROJECT.remove(project, this);
 
         LOG.info("Disposing ProteanChatWindow for project: " + project.getName());
 
@@ -911,6 +928,11 @@ public class ProteanChatWindow {
             session.interrupt();
         } catch (Exception e) {
             LOG.warn("Failed to clean up session: " + e.getMessage());
+        }
+        try {
+            persistSessionMetadata();
+        } catch (Exception e) {
+            LOG.warn("Failed to persist session metadata during dispose: " + e.getMessage());
         }
 
         int activeProcessCount = sdkBridge.getActiveProcessCount();

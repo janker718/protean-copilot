@@ -1,6 +1,7 @@
 package com.protean.copilot.handler.core;
 
 import com.protean.copilot.bridge.SdkBridge;
+import com.protean.copilot.permission.PermissionService;
 import com.protean.copilot.session.ChatSession;
 import com.protean.copilot.settings.SettingsService;
 import com.protean.copilot.util.JsUtils;
@@ -34,6 +35,7 @@ public class HandlerContext {
 
     public volatile ChatSession session = null;
     public volatile JBCefBrowser browser = null;
+    public volatile PermissionService permissionService = null;
     private volatile String currentModel = "default";
     private volatile String currentProvider = "protean";
     public volatile boolean isDisposed = false;
@@ -48,8 +50,15 @@ public class HandlerContext {
     public ChatSession getSession() { return session; }
     public void setSession(ChatSession session) { this.session = session; }
 
+    public Project getProject() { return project; }
+
+    public SettingsService getSettingsService() { return settingsService; }
+
     public JBCefBrowser getBrowser() { return browser; }
     public void setBrowser(JBCefBrowser browser) { this.browser = browser; }
+
+    public PermissionService getPermissionService() { return permissionService; }
+    public void setPermissionService(PermissionService permissionService) { this.permissionService = permissionService; }
 
     public String getCurrentModel() { return currentModel; }
     public void setCurrentModel(String currentModel) { this.currentModel = currentModel; }

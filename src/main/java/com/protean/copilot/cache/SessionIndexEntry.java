@@ -5,6 +5,10 @@ public record SessionIndexEntry(
     String summary,
     String provider,
     String workingDirectory,
-    long updatedAt
+    long updatedAt,
+    boolean favorited,
+    long favoritedAt,
+    String customTitle,
+    String entrypoint
 ) {
 }

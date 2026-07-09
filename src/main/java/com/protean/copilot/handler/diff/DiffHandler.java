@@ -5,7 +5,6 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.protean.copilot.handler.core.HandlerContext;
 import com.protean.copilot.handler.core.MessageHandler;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -16,23 +15,20 @@ public class DiffHandler implements MessageHandler {
 
     private static final Logger LOG = Logger.getInstance(DiffHandler.class);
 
-    private final SimpleDiffDisplayHandler simpleHandler;
-    private final InteractiveDiffHandler interactiveHandler;
+    private final DiffRequestDispatcher dispatcher;
     private final String[] supportedTypes;
 
     public DiffHandler(HandlerContext context) {
         Gson gson = new Gson();
-        DiffFileOperations fileOps = new DiffFileOperations(context.project);
+        DiffFileOperations fileOps = new DiffFileOperations(context);
         DiffBrowserBridge bridge = new DiffBrowserBridge(context.browser, gson);
-
-        this.simpleHandler = new SimpleDiffDisplayHandler(context.project, gson, fileOps);
-        this.interactiveHandler = new InteractiveDiffHandler(context.project, gson, bridge, fileOps);
-
-        // 聚合所有支持的消息类型
-        List<String> types = new ArrayList<>();
-        for (String t : simpleHandler.getSupportedTypes()) types.add(t);
-        for (String t : interactiveHandler.getSupportedTypes()) types.add(t);
-        this.supportedTypes = types.toArray(new String[0]);
+        List<DiffActionHandler> handlers = List.of(
+            new SimpleDiffDisplayHandler(context.project, gson, fileOps),
+            new InteractiveDiffMessageHandler(context, gson, bridge, fileOps),
+            new EditableDiffHandler(context, gson, bridge, fileOps)
+        );
+        this.dispatcher = new DiffRequestDispatcher(handlers);
+        this.supportedTypes = dispatcher.getAllSupportedTypes();
     }
 
     @Override
@@ -42,9 +38,10 @@ public class DiffHandler implements MessageHandler {
 
     @Override
     public boolean handle(String type, String content) {
-        if (simpleHandler.handle(type, content)) return true;
-        if (interactiveHandler.handle(type, content)) return true;
-        LOG.debug("No diff handler for type: " + type);
-        return false;
+        boolean handled = dispatcher.dispatch(type, content);
+        if (!handled) {
+            LOG.debug("No diff handler for type: " + type);
+        }
+        return handled;
     }
 }

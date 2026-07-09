@@ -2,6 +2,7 @@ package com.protean.copilot.ui;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.protean.copilot.util.JBCefBrowserFactory;
 import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefJSQuery;
 import org.cef.browser.CefBrowser;
@@ -55,8 +56,14 @@ public class WebviewInitializer {
         try {
             LOG.info("Creating JCEF browser for project: " + host.getProject().getName());
 
+            if (!JBCefBrowserFactory.isJcefSupported()) {
+                LOG.warn("JCEF is not supported in this environment");
+                showJcefNotSupportedPanel();
+                return;
+            }
+
             // 创建浏览器
-            JBCefBrowser browser = new JBCefBrowser();
+            JBCefBrowser browser = JBCefBrowserFactory.create();
             host.setBrowser(browser);
 
             // 设置 JS 查询桥接（JS -> Java 通信）
@@ -105,6 +112,17 @@ public class WebviewInitializer {
             LOG.error("Failed to create JCEF browser: " + e.getMessage(), e);
             showErrorPanel("Failed to initialize chat interface: " + e.getMessage());
         }
+    }
+
+    private void showJcefNotSupportedPanel() {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 20));
+        JLabel label = new JLabel("<html><body style='text-align:center;padding:40px;'>"
+            + "<h2 style='color:#f85149;'>JCEF is not available</h2>"
+            + "<p>The chat webview could not be created in the current IDE runtime.</p>"
+            + "<p>Please run this plugin in an IDE build with JCEF support enabled.</p>"
+            + "</body></html>");
+        panel.add(label);
+        replaceMainContent(panel);
     }
 
     /**

@@ -3,6 +3,7 @@ package com.protean.copilot.session;
 import com.protean.copilot.bridge.SdkBridge;
 import com.protean.copilot.provider.claude.ClaudeSDKBridge;
 import com.protean.copilot.settings.SettingsService;
+import com.protean.copilot.settings.manager.WorkingDirectoryManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 
@@ -99,10 +100,7 @@ public class SessionSendService {
             session.setReasoningEffort(normalizedRequestedEffort);
         }
         if (session.getCwd() == null || session.getCwd().isBlank()) {
-            String basePath = project.getBasePath();
-            session.setCwd((basePath != null && !basePath.isBlank())
-                ? basePath
-                : System.getProperty("user.home", "."));
+            session.setCwd(WorkingDirectoryManager.getInstance(project).resolveWorkingDirectory());
         }
 
         SessionCallbackAdapter callback = session.getCallback();
@@ -182,7 +180,7 @@ public class SessionSendService {
 
     private static String normalizeProvider(String provider) {
         if (provider == null || provider.isBlank()) {
-            return "protean";
+            return "claude";
         }
         return provider.trim();
     }

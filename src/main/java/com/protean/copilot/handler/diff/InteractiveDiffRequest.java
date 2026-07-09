@@ -45,6 +45,21 @@ public class InteractiveDiffRequest {
         return new InteractiveDiffRequest(filePath, "", newFileContents, tabName, true, false);
     }
 
+    public static InteractiveDiffRequest forReadOnlyModifiedFile(
+            @NotNull String filePath,
+            @NotNull String originalContent,
+            @NotNull String newFileContents,
+            @NotNull String tabName) {
+        return new InteractiveDiffRequest(filePath, originalContent, newFileContents, tabName, false, true);
+    }
+
+    public static InteractiveDiffRequest forReadOnlyNewFile(
+            @NotNull String filePath,
+            @NotNull String newFileContents,
+            @NotNull String tabName) {
+        return new InteractiveDiffRequest(filePath, "", newFileContents, tabName, true, true);
+    }
+
     @NotNull public String getFilePath() { return filePath; }
     @NotNull public String getOriginalContent() { return originalContent != null ? originalContent : ""; }
     @NotNull public String getNewFileContents() { return newFileContents; }

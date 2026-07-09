@@ -51,15 +51,33 @@ public class CodemossSettingsService {
     private static final String KEY_STATUS_BAR_WIDGET_ENABLED = "statusBarWidgetEnabled";
     private static final String KEY_TASK_COMPLETION_NOTIFICATION_ENABLED = "taskCompletionNotificationEnabled";
     private static final String KEY_COMMIT_GENERATION_ENABLED = "commitGenerationEnabled";
+    private static final String KEY_AI_TITLE_GENERATION_ENABLED = "aiTitleGenerationEnabled";
+    private static final String KEY_SOUND_NOTIFICATION = "soundNotification";
+    private static final String KEY_SOUND_ENABLED = "enabled";
+    private static final String KEY_SOUND_ONLY_WHEN_UNFOCUSED = "onlyWhenUnfocused";
+    private static final String KEY_SOUND_SELECTED = "selectedSound";
+    private static final String KEY_SOUND_CUSTOM_PATH = "customSoundPath";
+    private static final String KEY_SEND_SHORTCUT = "sendShortcut";
+    private static final String KEY_UI_FONT_CONFIG = "uiFontConfig";
+    private static final String KEY_CODE_FONT_CONFIG = "codeFontConfig";
+    private static final String KEY_MODE = "mode";
+    private static final String KEY_CUSTOM_FONT_PATH = "customFontPath";
+    private static final String KEY_COMMIT_AI_CONFIG = "commitAiConfig";
+    private static final String KEY_PROMPT_ENHANCER_CONFIG = "promptEnhancerConfig";
     private static final String KEY_CODEX = "codex";
     private static final String KEY_CODEX_CURRENT = "current";
     private static final String KEY_CODEX_PROVIDERS = "providers";
     private static final String KEY_CODEX_LOCAL_CONFIG_AUTHORIZED = "localConfigAuthorized";
+    private static final String KEY_CODEX_SANDBOX_MODE = "sandboxMode";
 
     private static final String DEFAULT_CONFIG_DIR_NAME = ".codemoss";
     private static final String DEFAULT_CONFIG_FILE_NAME = "config.json";
     private static final String DEFAULT_BACKUP_FILE_NAME = "config.json.bak";
     private static final String DEFAULT_CODEX_CLI_LOGIN_PROVIDER_ID = "codex-cli-login";
+    public static final int DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS =
+        PermissionDialogTimeoutSettings.DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS;
+    public static final long PERMISSION_SAFETY_NET_BUFFER_SECONDS =
+        PermissionDialogTimeoutSettings.PERMISSION_SAFETY_NET_BUFFER_SECONDS;
 
     private final Gson gson;
     private final SettingsService settingsService;
@@ -221,6 +239,14 @@ public class CodemossSettingsService {
         writeProjectBooleanConfig(KEY_AUTO_OPEN_FILE, projectPath, enabled);
     }
 
+    public int getPermissionDialogTimeoutSeconds() throws IOException {
+        return PermissionDialogTimeoutSettings.getPermissionDialogTimeoutSeconds(this);
+    }
+
+    public void setPermissionDialogTimeoutSeconds(int seconds) throws IOException {
+        PermissionDialogTimeoutSettings.setPermissionDialogTimeoutSeconds(this, seconds);
+    }
+
     // ==================== Commit Prompt Config Management ====================
 
     public String getCommitPrompt() throws IOException {
@@ -367,7 +393,7 @@ public class CodemossSettingsService {
     }
 
     public boolean getTaskCompletionNotificationEnabled() throws IOException {
-        return readBooleanFlag(KEY_TASK_COMPLETION_NOTIFICATION_ENABLED, true);
+        return readBooleanFlag(KEY_TASK_COMPLETION_NOTIFICATION_ENABLED, false);
     }
 
     public void setTaskCompletionNotificationEnabled(boolean enabled) throws IOException {
@@ -380,6 +406,158 @@ public class CodemossSettingsService {
 
     public void setCommitGenerationEnabled(boolean enabled) throws IOException {
         writeBooleanFlag(KEY_COMMIT_GENERATION_ENABLED, enabled);
+    }
+
+    public boolean getAiTitleGenerationEnabled() throws IOException {
+        return readBooleanFlag(KEY_AI_TITLE_GENERATION_ENABLED, true);
+    }
+
+    public void setAiTitleGenerationEnabled(boolean enabled) throws IOException {
+        writeBooleanFlag(KEY_AI_TITLE_GENERATION_ENABLED, enabled);
+    }
+
+    public boolean getSoundNotificationEnabled() throws IOException {
+        return readSoundConfig().has(KEY_SOUND_ENABLED)
+            && readSoundConfig().get(KEY_SOUND_ENABLED).getAsBoolean();
+    }
+
+    public void setSoundNotificationEnabled(boolean enabled) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject sound = ensureObject(config, KEY_SOUND_NOTIFICATION);
+        sound.addProperty(KEY_SOUND_ENABLED, enabled);
+        writeConfig(config);
+    }
+
+    public boolean getSoundOnlyWhenUnfocused() throws IOException {
+        JsonObject sound = readSoundConfig();
+        return sound.has(KEY_SOUND_ONLY_WHEN_UNFOCUSED)
+            && !sound.get(KEY_SOUND_ONLY_WHEN_UNFOCUSED).isJsonNull()
+            && sound.get(KEY_SOUND_ONLY_WHEN_UNFOCUSED).getAsBoolean();
+    }
+
+    public void setSoundOnlyWhenUnfocused(boolean onlyWhenUnfocused) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject sound = ensureObject(config, KEY_SOUND_NOTIFICATION);
+        sound.addProperty(KEY_SOUND_ONLY_WHEN_UNFOCUSED, onlyWhenUnfocused);
+        writeConfig(config);
+    }
+
+    public String getSelectedSound() throws IOException {
+        JsonObject sound = readSoundConfig();
+        return getNullableString(sound, KEY_SOUND_SELECTED) != null
+            ? getNullableString(sound, KEY_SOUND_SELECTED)
+            : "default";
+    }
+
+    public void setSelectedSound(String soundId) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject sound = ensureObject(config, KEY_SOUND_NOTIFICATION);
+        sound.addProperty(KEY_SOUND_SELECTED, soundId == null || soundId.isBlank() ? "default" : soundId.trim());
+        writeConfig(config);
+    }
+
+    public @Nullable String getCustomSoundPath() throws IOException {
+        return getNullableString(readSoundConfig(), KEY_SOUND_CUSTOM_PATH);
+    }
+
+    public void setCustomSoundPath(@Nullable String path) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject sound = ensureObject(config, KEY_SOUND_NOTIFICATION);
+        if (path == null || path.isBlank()) {
+            sound.remove(KEY_SOUND_CUSTOM_PATH);
+        } else {
+            sound.addProperty(KEY_SOUND_CUSTOM_PATH, path.trim());
+        }
+        writeConfig(config);
+    }
+
+    public String getSendShortcut() throws IOException {
+        JsonObject config = readConfig();
+        String shortcut = getNullableString(config, KEY_SEND_SHORTCUT);
+        return "cmdEnter".equals(shortcut) ? "cmdEnter" : "enter";
+    }
+
+    public void setSendShortcut(String shortcut) throws IOException {
+        JsonObject config = readConfig();
+        config.addProperty(KEY_SEND_SHORTCUT, "cmdEnter".equals(shortcut) ? "cmdEnter" : "enter");
+        writeConfig(config);
+    }
+
+    public String getCodexSandboxMode(@Nullable String projectPath) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject codex = ensureObject(config, KEY_CODEX);
+        JsonObject sandbox = ensureObject(codex, KEY_CODEX_SANDBOX_MODE);
+        if (projectPath != null && sandbox.has(projectPath) && !sandbox.get(projectPath).isJsonNull()) {
+            return sandbox.get(projectPath).getAsString();
+        }
+        String fallback = getNullableString(sandbox, "default");
+        return isValidSandboxMode(fallback) ? fallback : "danger-full-access";
+    }
+
+    public void setCodexSandboxMode(@Nullable String projectPath, @Nullable String sandboxMode) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject codex = ensureObject(config, KEY_CODEX);
+        JsonObject sandbox = ensureObject(codex, KEY_CODEX_SANDBOX_MODE);
+        String normalized = isValidSandboxMode(sandboxMode) ? sandboxMode : "danger-full-access";
+        sandbox.addProperty("default", normalized);
+        if (projectPath != null && !projectPath.isBlank()) {
+            sandbox.addProperty(projectPath, normalized);
+        }
+        writeConfig(config);
+    }
+
+    public JsonObject getUiFontConfig() throws IOException {
+        return normalizeFontConfig(readFontConfig(KEY_UI_FONT_CONFIG));
+    }
+
+    public void setUiFontConfig(JsonObject input) throws IOException {
+        writeFontConfig(KEY_UI_FONT_CONFIG, input);
+    }
+
+    public JsonObject getCodeFontConfig() throws IOException {
+        return normalizeFontConfig(readFontConfig(KEY_CODE_FONT_CONFIG));
+    }
+
+    public void setCodeFontConfig(JsonObject input) throws IOException {
+        writeFontConfig(KEY_CODE_FONT_CONFIG, input);
+    }
+
+    public JsonObject getCommitAiConfig() throws IOException {
+        JsonObject stored = readFeatureConfig(KEY_COMMIT_AI_CONFIG);
+        if (!stored.has("effectiveProvider") || stored.get("effectiveProvider").isJsonNull()) {
+            stored.addProperty("effectiveProvider", stored.has("provider") && !stored.get("provider").isJsonNull()
+                ? stored.get("provider").getAsString()
+                : "codex");
+        }
+        if (!stored.has("resolutionSource") || stored.get("resolutionSource").isJsonNull()) {
+            stored.addProperty("resolutionSource", stored.has("provider") && !stored.get("provider").isJsonNull()
+                ? "manual"
+                : "auto");
+        }
+        return stored;
+    }
+
+    public void setCommitAiConfig(JsonObject configInput) throws IOException {
+        writeFeatureConfig(KEY_COMMIT_AI_CONFIG, configInput, "codex");
+    }
+
+    public JsonObject getPromptEnhancerConfig() throws IOException {
+        JsonObject stored = readFeatureConfig(KEY_PROMPT_ENHANCER_CONFIG);
+        if (!stored.has("effectiveProvider") || stored.get("effectiveProvider").isJsonNull()) {
+            stored.addProperty("effectiveProvider", stored.has("provider") && !stored.get("provider").isJsonNull()
+                ? stored.get("provider").getAsString()
+                : "claude");
+        }
+        if (!stored.has("resolutionSource") || stored.get("resolutionSource").isJsonNull()) {
+            stored.addProperty("resolutionSource", stored.has("provider") && !stored.get("provider").isJsonNull()
+                ? "manual"
+                : "auto");
+        }
+        return stored;
+    }
+
+    public void setPromptEnhancerConfig(JsonObject configInput) throws IOException {
+        writeFeatureConfig(KEY_PROMPT_ENHANCER_CONFIG, configInput, "claude");
     }
 
     // ==================== Codex Runtime Access ====================
@@ -515,6 +693,136 @@ public class CodemossSettingsService {
             return object;
         }
         return parent.getAsJsonObject(key);
+    }
+
+    private JsonObject readSoundConfig() throws IOException {
+        JsonObject config = readConfig();
+        JsonObject sound = ensureObject(config, KEY_SOUND_NOTIFICATION);
+        if (!sound.has(KEY_SOUND_ENABLED)) {
+            sound.addProperty(KEY_SOUND_ENABLED, false);
+        }
+        if (!sound.has(KEY_SOUND_ONLY_WHEN_UNFOCUSED)) {
+            sound.addProperty(KEY_SOUND_ONLY_WHEN_UNFOCUSED, false);
+        }
+        if (!sound.has(KEY_SOUND_SELECTED)) {
+            sound.addProperty(KEY_SOUND_SELECTED, "default");
+        }
+        return sound;
+    }
+
+    private JsonObject readFontConfig(String key) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject font = ensureObject(config, key);
+        if (!font.has(KEY_MODE) || font.get(KEY_MODE).isJsonNull()) {
+            font.addProperty(KEY_MODE, "followEditor");
+        }
+        return font.deepCopy();
+    }
+
+    private JsonObject normalizeFontConfig(JsonObject stored) {
+        JsonObject normalized = new JsonObject();
+        String mode = getNullableString(stored, KEY_MODE);
+        String effectiveMode = "customFile".equals(mode) ? "customFile" : "followEditor";
+        normalized.addProperty("mode", effectiveMode);
+        normalized.addProperty("effectiveMode", effectiveMode);
+        String customFontPath = getNullableString(stored, KEY_CUSTOM_FONT_PATH);
+        if (customFontPath != null) {
+            normalized.addProperty(KEY_CUSTOM_FONT_PATH, customFontPath);
+        }
+        return normalized;
+    }
+
+    private void writeFontConfig(String key, JsonObject input) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject font = ensureObject(config, key);
+        String mode = input != null && input.has(KEY_MODE) && !input.get(KEY_MODE).isJsonNull()
+            ? input.get(KEY_MODE).getAsString()
+            : "followEditor";
+        if ("customFile".equals(mode)) {
+            font.addProperty(KEY_MODE, "customFile");
+            String path = input != null && input.has(KEY_CUSTOM_FONT_PATH) && !input.get(KEY_CUSTOM_FONT_PATH).isJsonNull()
+                ? input.get(KEY_CUSTOM_FONT_PATH).getAsString()
+                : "";
+            font.addProperty(KEY_CUSTOM_FONT_PATH, path);
+        } else {
+            font.addProperty(KEY_MODE, "followEditor");
+            font.remove(KEY_CUSTOM_FONT_PATH);
+        }
+        writeConfig(config);
+    }
+
+    private JsonObject readFeatureConfig(String key) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject feature = ensureObject(config, key).deepCopy();
+        ensureProviderModelDefaults(feature);
+        ensureAvailabilityDefaults(feature);
+        return feature;
+    }
+
+    private void writeFeatureConfig(String key, JsonObject configInput, String defaultProvider) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject feature = ensureObject(config, key);
+        feature.entrySet().clear();
+        if (configInput != null && configInput.has("provider")) {
+            feature.add("provider", configInput.get("provider"));
+        }
+        JsonObject models = new JsonObject();
+        JsonObject inputModels = configInput != null && configInput.has("models") && configInput.get("models").isJsonObject()
+            ? configInput.getAsJsonObject("models")
+            : new JsonObject();
+        models.addProperty("claude", getModelValue(inputModels, "claude", "claude-sonnet-4-6"));
+        models.addProperty("codex", getModelValue(inputModels, "codex", "gpt-5.5"));
+        feature.add("models", models);
+        JsonObject availability = new JsonObject();
+        availability.addProperty("claude", true);
+        availability.addProperty("codex", true);
+        feature.add("availability", availability);
+        String provider = configInput != null && configInput.has("provider") && !configInput.get("provider").isJsonNull()
+            ? configInput.get("provider").getAsString()
+            : null;
+        feature.addProperty("effectiveProvider", provider != null ? provider : defaultProvider);
+        feature.addProperty("resolutionSource", provider != null ? "manual" : "auto");
+        writeConfig(config);
+    }
+
+    private void ensureProviderModelDefaults(JsonObject feature) {
+        JsonObject models = feature.has("models") && feature.get("models").isJsonObject()
+            ? feature.getAsJsonObject("models")
+            : new JsonObject();
+        if (!models.has("claude")) {
+            models.addProperty("claude", "claude-sonnet-4-6");
+        }
+        if (!models.has("codex")) {
+            models.addProperty("codex", "gpt-5.5");
+        }
+        feature.add("models", models);
+    }
+
+    private void ensureAvailabilityDefaults(JsonObject feature) {
+        JsonObject availability = feature.has("availability") && feature.get("availability").isJsonObject()
+            ? feature.getAsJsonObject("availability")
+            : new JsonObject();
+        if (!availability.has("claude")) {
+            availability.addProperty("claude", true);
+        }
+        if (!availability.has("codex")) {
+            availability.addProperty("codex", true);
+        }
+        feature.add("availability", availability);
+    }
+
+    private static String getModelValue(JsonObject models, String key, String defaultValue) {
+        if (models.has(key) && !models.get(key).isJsonNull()) {
+            String value = models.get(key).getAsString();
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return defaultValue;
+    }
+
+    private static boolean isValidSandboxMode(@Nullable String sandboxMode) {
+        return "workspace-write".equals(sandboxMode) || "danger-full-access".equals(sandboxMode);
     }
 
     private boolean readBooleanFlag(String key, boolean defaultValue) throws IOException {

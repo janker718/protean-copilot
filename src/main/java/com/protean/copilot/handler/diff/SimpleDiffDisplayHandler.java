@@ -24,7 +24,7 @@ import java.nio.charset.StandardCharsets;
  * 处理非交互式差异显示请求。
  * 使用 IntelliJ 内置 DiffManager 打开只读差异查看器。
  */
-public class SimpleDiffDisplayHandler {
+public class SimpleDiffDisplayHandler implements DiffActionHandler {
 
     private static final Logger LOG = Logger.getInstance(SimpleDiffDisplayHandler.class);
 
@@ -38,18 +38,21 @@ public class SimpleDiffDisplayHandler {
         this.fileOps = fileOps;
     }
 
+    @Override
     public String[] getSupportedTypes() {
         return new String[]{"show_diff", "show_multi_edit_diff", "show_edit_preview_diff", "show_edit_full_diff"};
     }
 
-    public boolean handle(String type, String content) {
-        return switch (type) {
-            case "show_diff" -> { handleShowDiff(content); yield true; }
-            case "show_multi_edit_diff" -> { handleShowMultiEditDiff(content); yield true; }
-            case "show_edit_preview_diff" -> { handleShowEditPreviewDiff(content); yield true; }
-            case "show_edit_full_diff" -> { handleShowEditFullDiff(content); yield true; }
-            default -> false;
-        };
+    @Override
+    public void handle(String type, String content) {
+        switch (type) {
+            case "show_diff" -> handleShowDiff(content);
+            case "show_multi_edit_diff" -> handleShowMultiEditDiff(content);
+            case "show_edit_preview_diff" -> handleShowEditPreviewDiff(content);
+            case "show_edit_full_diff" -> handleShowEditFullDiff(content);
+            default -> {
+            }
+        }
     }
 
     private void handleShowDiff(String content) {

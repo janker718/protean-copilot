@@ -2,14 +2,16 @@ package com.protean.copilot.session;
 
 import com.google.gson.JsonObject;
 import com.protean.copilot.bridge.SdkBridge;
+import com.protean.copilot.history.HistoryMetadataService;
 import com.protean.copilot.provider.claude.ClaudeSDKBridge;
 import com.protean.copilot.settings.SettingsService;
+import com.protean.copilot.settings.manager.ProviderManager;
+import com.protean.copilot.settings.manager.WorkingDirectoryManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -80,7 +82,7 @@ public class ChatSession {
     private volatile String cwd;
     private volatile String permissionMode = "bypassPermissions";
     private volatile String model = "default";
-    private volatile String provider = "protean";
+    private volatile String provider;
     private volatile String reasoningEffort;
     private volatile List<String> slashCommands = new ArrayList<>();
 
@@ -90,14 +92,8 @@ public class ChatSession {
         this.project = project;
         this.sdkBridge = sdkBridge;
         this.sendService = new SessionSendService(project, new SettingsService(), sdkBridge);
-
-        String basePath = project.getBasePath();
-        if (basePath != null) {
-            this.cwd = basePath;
-        } else {
-            String userHome = System.getProperty("user.home");
-            this.cwd = Objects.requireNonNullElse(userHome, ".");
-        }
+        this.provider = ProviderManager.getInstance(project).getActiveProvider();
+        this.cwd = WorkingDirectoryManager.getInstance(project).resolveWorkingDirectory();
     }
 
     public Project getProject() {
@@ -211,7 +207,7 @@ public class ChatSession {
     }
 
     public void setCwd(String cwd) {
-        this.cwd = cwd;
+        this.cwd = WorkingDirectoryManager.getInstance(project).resolveWorkingDirectory(cwd);
         LOG.info("Working directory updated to: " + cwd);
     }
 
@@ -226,7 +222,7 @@ public class ChatSession {
     }
 
     public void setProvider(String provider) {
-        this.provider = (provider == null || provider.isBlank()) ? "protean" : provider.trim();
+        this.provider = ProviderManager.getInstance(project).resolveProvider(provider);
         LOG.info("Provider updated to: " + this.provider);
     }
 
@@ -348,6 +344,7 @@ public class ChatSession {
         Message userMessage = buildUserMessage(normalizedInput, attachments);
         addMessage(userMessage);
         updateSummaryFromInput(normalizedInput);
+        HistoryMetadataService.getInstance(project).updateFromSession(this);
 
         error = null;
         busy = true;
@@ -374,6 +371,7 @@ public class ChatSession {
             loading = false;
             error = ex != null ? ex.getMessage() : null;
             updateLastModifiedTime();
+            HistoryMetadataService.getInstance(project).updateFromSession(this);
         });
     }
 
@@ -419,6 +417,8 @@ public class ChatSession {
                 if (ex == null) {
                     error = null;
                 }
+                updateLastModifiedTime();
+                HistoryMetadataService.getInstance(project).updateFromSession(this);
             });
         }
         return CompletableFuture.completedFuture(null);

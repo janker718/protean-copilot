@@ -5,6 +5,7 @@ import com.intellij.openapi.project.Project;
 import com.protean.copilot.cache.SessionIndexCache;
 import com.protean.copilot.cache.SessionIndexEntry;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
 
@@ -23,6 +24,10 @@ public final class HistoryIndexService {
 
     public @NotNull Collection<SessionIndexEntry> listEntries() {
         return SessionIndexCache.getInstance(project).getAll();
+    }
+
+    public @Nullable SessionIndexEntry getEntry(@NotNull String sessionId) {
+        return SessionIndexCache.getInstance(project).get(sessionId);
     }
 
     public void remove(@NotNull String sessionId) {
