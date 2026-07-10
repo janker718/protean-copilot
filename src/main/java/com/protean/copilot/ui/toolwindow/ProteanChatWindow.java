@@ -753,7 +753,14 @@ public class ProteanChatWindow {
                 String value = trimmed.substring(colonIndex + 1).trim();
 
                 switch (key) {
-                    case "heartbeat" -> webviewWatchdog.handleHeartbeat(value);
+                    case "heartbeat" -> {
+                        webviewWatchdog.handleHeartbeat(value);
+                        return;
+                    }
+                }
+
+                if (messageDispatcher != null && !key.isEmpty()) {
+                    messageDispatcher.dispatch(key, value);
                 }
             }
         } catch (Exception e) {

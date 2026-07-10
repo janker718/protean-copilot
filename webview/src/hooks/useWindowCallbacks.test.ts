@@ -230,6 +230,22 @@ describe('useWindowCallbacks integration', () => {
     expect(opts.setCurrentSessionId).toHaveBeenCalledWith('new-session-123');
   });
 
+  it('updateDependencyStatus marks sdk status as loaded for app gating', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.updateDependencyStatus?.(JSON.stringify({
+        'codex-sdk': { installed: true, status: 'installed' },
+      }));
+    });
+
+    expect(opts.setSdkStatus).toHaveBeenCalledWith({
+      'codex-sdk': { installed: true, status: 'installed' },
+    });
+    expect(opts.setSdkStatusLoaded).toHaveBeenCalledWith(true);
+  });
+
   // ===== AI title path uses applyHistoryTitleLocal (no backend round-trip) =====
 
   it('updateSessionTitle routes AI titles through applyHistoryTitleLocal, not updateHistoryTitle', () => {

@@ -70,6 +70,18 @@ public class SdkBridge {
         return codexBridge;
     }
 
+    public boolean isProviderRunning(String provider) {
+        if (provider == null || provider.isBlank()) {
+            return claudeBridge != null && claudeBridge.isRunning();
+        }
+        String normalized = provider.trim().toLowerCase();
+        return switch (normalized) {
+            case "claude" -> claudeBridge != null && claudeBridge.isRunning();
+            case "codex" -> codexBridge != null && codexBridge.isRunning();
+            default -> false;
+        };
+    }
+
     /**
      * 获取活跃的 SDK 进程数量。
      *

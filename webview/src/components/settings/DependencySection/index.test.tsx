@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DependencySection from './index';
 
 const translations: Record<string, string> = {
@@ -24,6 +24,10 @@ const translations: Record<string, string> = {
   'settings.dependency.updateAvailable': '有更新',
   'settings.dependency.rollbackWarning': '目标版本低于当前版本，将执行回退安装。',
   'settings.dependency.targetVersionValue': '目标版本 {{version}}',
+  'settings.dependency.installSuccess': '{{name}} 安装成功',
+  'settings.dependency.updateSuccess': '{{name}} 更新成功',
+  'settings.dependency.installFailed': '安装失败: {{error}}',
+  'settings.dependency.nodeNotConfigured': 'Node.js 未配置',
 };
 
 vi.mock('react-i18next', () => ({
@@ -46,8 +50,84 @@ describe('DependencySection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sendToJava = vi.fn();
+    window.__pendingDependencyStatus = undefined;
     window.__pendingDependencyUpdates = undefined;
     window.__pendingDependencyVersions = undefined;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('drains dependency status that arrived before the settings section mounted', () => {
+    window.__pendingDependencyStatus = JSON.stringify({
+      'claude-sdk': {
+        id: 'claude-sdk',
+        name: 'Claude Code SDK',
+        status: 'installed',
+        installedVersion: '0.2.89',
+        hasUpdate: false,
+      },
+      'codex-sdk': {
+        id: 'codex-sdk',
+        name: 'Codex SDK',
+        status: 'not_installed',
+        hasUpdate: false,
+      },
+    });
+
+    render(<DependencySection isActive={false} />);
+
+    expect(window.__pendingDependencyStatus).toBeUndefined();
+    expect(screen.queryByText('加载中')).toBeNull();
+    expect(screen.getByRole('button', { name: '当前版本' })).toBeTruthy();
+  });
+
+  it('falls back from a missing dependency status response instead of staying on loading forever', () => {
+    vi.useFakeTimers();
+
+    render(<DependencySection isActive />);
+
+    expect(screen.getByText('加载中')).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+
+    expect(screen.queryByText('加载中')).toBeNull();
+    expect(screen.getByText('Claude Code SDK')).toBeTruthy();
+    expect(screen.getByText('Codex SDK')).toBeTruthy();
+  });
+
+  it('stops showing version loading hints when the version response times out', () => {
+    vi.useFakeTimers();
+
+    render(<DependencySection isActive />);
+
+    act(() => {
+      window.updateDependencyStatus?.(JSON.stringify({
+        'claude-sdk': {
+          id: 'claude-sdk',
+          name: 'Claude Code SDK',
+          status: 'not_installed',
+          hasUpdate: false,
+        },
+        'codex-sdk': {
+          id: 'codex-sdk',
+          name: 'Codex SDK',
+          status: 'not_installed',
+          hasUpdate: false,
+        },
+      }));
+    });
+
+    expect(screen.getAllByText('版本列表加载中').length).toBeGreaterThan(0);
+
+    act(() => {
+      vi.advanceTimersByTime(8000);
+    });
+
+    expect(screen.queryByText('版本列表加载中')).toBeNull();
   });
 
   it('removes the custom version input and keeps a compact version selector with actions', () => {
@@ -189,5 +269,114 @@ describe('DependencySection', () => {
     });
 
     expect(screen.queryByText('版本列表加载中')).toBeNull();
+  });
+
+  it('blocks install when node environment is unavailable', async () => {
+    const addToast = vi.fn();
+    render(<DependencySection isActive={false} addToast={addToast} />);
+
+    act(() => {
+      window.updateDependencyStatus?.(JSON.stringify({
+        'claude-sdk': {
+          id: 'claude-sdk',
+          name: 'Claude Code SDK',
+          status: 'not_installed',
+          hasUpdate: false,
+        },
+        'codex-sdk': {
+          id: 'codex-sdk',
+          name: 'Codex SDK',
+          status: 'not_installed',
+          hasUpdate: false,
+        },
+      }));
+      window.dependencyVersionsLoaded?.(JSON.stringify({
+        'claude-sdk': {
+          sdkId: 'claude-sdk',
+          versions: ['0.2.89'],
+          source: 'fallback',
+          latestVersion: '0.2.89',
+        },
+        'codex-sdk': {
+          sdkId: 'codex-sdk',
+          versions: ['0.143.0'],
+          source: 'fallback',
+          latestVersion: '0.143.0',
+        },
+      }));
+      window.nodeEnvironmentStatus?.(JSON.stringify({
+        available: false,
+        nodePath: '/usr/local/bin/node',
+        version: 'v22.0.0',
+        npmVersion: '10.8.0',
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Node.js 未配置')).toBeTruthy();
+    });
+
+    const installButton = screen.getByRole('button', { name: '安装 v0.143.0' }) as HTMLButtonElement;
+    expect(installButton.disabled).toBe(true);
+
+    fireEvent.click(installButton);
+
+    expect(addToast).not.toHaveBeenCalled();
+    expect(window.sendToJava).not.toHaveBeenCalledWith(expect.stringContaining('install_dependency:'));
+  });
+
+  it('shows backend install failures through toast messaging', () => {
+    const addToast = vi.fn();
+    render(<DependencySection isActive={false} addToast={addToast} />);
+
+    act(() => {
+      window.updateDependencyStatus?.(JSON.stringify({
+        'claude-sdk': {
+          id: 'claude-sdk',
+          name: 'Claude Code SDK',
+          status: 'not_installed',
+          hasUpdate: false,
+        },
+        'codex-sdk': {
+          id: 'codex-sdk',
+          name: 'Codex SDK',
+          status: 'not_installed',
+          hasUpdate: false,
+        },
+      }));
+      window.dependencyVersionsLoaded?.(JSON.stringify({
+        'claude-sdk': {
+          sdkId: 'claude-sdk',
+          versions: ['0.2.89'],
+          source: 'fallback',
+          latestVersion: '0.2.89',
+        },
+        'codex-sdk': {
+          sdkId: 'codex-sdk',
+          versions: ['0.143.0'],
+          source: 'fallback',
+          latestVersion: '0.143.0',
+        },
+      }));
+      window.nodeEnvironmentStatus?.(JSON.stringify({
+        available: true,
+        nodePath: '/usr/local/bin/node',
+        version: 'v22.0.0',
+        npmVersion: '10.8.0',
+      }));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '安装 v0.143.0' }));
+
+    act(() => {
+      window.dependencyInstallResult?.(JSON.stringify({
+        success: false,
+        sdkId: 'codex-sdk',
+        requestedVersion: '0.143.0',
+        error: 'npm install failed',
+      }));
+    });
+
+    expect(addToast).toHaveBeenCalledWith('安装失败: npm install failed', 'error');
   });
 });

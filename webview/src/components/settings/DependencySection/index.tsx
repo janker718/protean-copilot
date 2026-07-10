@@ -78,6 +78,24 @@ const SDK_DEFINITIONS = [
   },
 ];
 
+const DEPENDENCY_STATUS_TIMEOUT_MS = 5000;
+const DEPENDENCY_VERSIONS_TIMEOUT_MS = 8000;
+
+const buildFallbackDependencyStatus = (
+  t: (key: string) => string,
+): Record<SdkId, SdkStatus> => SDK_DEFINITIONS.reduce((acc, sdk) => {
+  acc[sdk.id] = {
+    id: sdk.id,
+    name: t(sdk.nameKey),
+    description: t(sdk.description),
+    status: 'not_installed',
+    hasUpdate: false,
+    lastChecked: new Date().toISOString(),
+    errorMessage: 'Dependency status request timed out',
+  };
+  return acc;
+}, {} as Record<SdkId, SdkStatus>);
+
 const VersionSelect = ({
   value,
   options,
@@ -399,6 +417,10 @@ const DependencySection = ({ addToast, isActive }: DependencySectionProps) => {
       window.dependencyUpdateAvailable(window.__pendingDependencyUpdates);
       window.__pendingDependencyUpdates = undefined;
     }
+    if (window.__pendingDependencyStatus) {
+      window.updateDependencyStatus(window.__pendingDependencyStatus);
+      window.__pendingDependencyStatus = undefined;
+    }
     if (window.__pendingDependencyVersions) {
       window.dependencyVersionsLoaded(window.__pendingDependencyVersions);
       window.__pendingDependencyVersions = undefined;
@@ -443,6 +465,43 @@ const DependencySection = ({ addToast, isActive }: DependencySectionProps) => {
       sendToJava('check_node_environment:');
     }
   }, [isActive]);
+
+  useEffect(() => {
+    if (!isActive || !loading) {
+      return undefined;
+    }
+
+    const timeout = window.setTimeout(() => {
+      console.warn('[DependencySection] Dependency status request timed out; using local fallback status');
+      setSdkStatus((prev) => {
+        if (Object.keys(prev).length > 0) {
+          return prev;
+        }
+        const fallback = buildFallbackDependencyStatus(tRef.current);
+        sdkStatusRef.current = fallback;
+        return fallback;
+      });
+      setLoading(false);
+    }, DEPENDENCY_STATUS_TIMEOUT_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [isActive, loading]);
+
+  useEffect(() => {
+    if (!isActive || !Object.values(loadingVersions).some(Boolean)) {
+      return undefined;
+    }
+
+    const timeout = window.setTimeout(() => {
+      console.warn('[DependencySection] Dependency version request timed out');
+      setLoadingVersions({
+        'claude-sdk': false,
+        'codex-sdk': false,
+      });
+    }, DEPENDENCY_VERSIONS_TIMEOUT_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [isActive, loadingVersions]);
 
   const handleInstall = (sdkId: SdkId) => {
     if (nodeAvailable === false) {

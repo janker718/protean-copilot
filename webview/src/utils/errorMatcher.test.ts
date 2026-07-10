@@ -67,4 +67,25 @@ describe('matchErrorPattern', () => {
     expect(matchErrorPattern('SPAWN EBUSY')?.code).toBe('spawnEbusy');
     expect(matchErrorPattern('something failed: spawn ebusy at line 42')?.code).toBe('spawnEbusy');
   });
+
+  it('matches normalized resume failures from Java runtime recovery path', () => {
+    expect(matchErrorPattern('Codex session resume failed. thread/resume returned 404.')?.code).toBe(
+      'codexThreadResume',
+    );
+  });
+
+  it('matches normalized permission denied failures', () => {
+    expect(
+      matchErrorPattern('Codex permission request was denied. approval denied for apply_patch.')
+        ?.code,
+    ).toBe('permissionDenied');
+  });
+
+  it('matches normalized sandbox denied failures', () => {
+    expect(
+      matchErrorPattern(
+        'Codex sandbox denied the requested operation. Sandbox denied write access.',
+      )?.code,
+    ).toBe('sandboxDenied');
+  });
 });

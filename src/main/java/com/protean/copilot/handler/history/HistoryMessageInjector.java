@@ -8,6 +8,7 @@ import com.protean.copilot.handler.core.HandlerContext;
 import com.protean.copilot.history.HistoryIndexService;
 import com.protean.copilot.session.HistorySessionLoadRequest;
 import com.protean.copilot.session.SessionLifecycleManager;
+import com.protean.copilot.session.SessionRuntimeMessages;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -39,7 +40,7 @@ public final class HistoryMessageInjector {
 
             if (sessionId == null) {
                 context.callJavaScript("historyLoadComplete");
-                context.callJavaScript("addErrorMessage", "Missing history sessionId");
+                context.callJavaScript("addErrorMessage", SessionRuntimeMessages.historySessionIdMissing());
                 return;
             }
 
@@ -57,7 +58,8 @@ public final class HistoryMessageInjector {
         } catch (Exception ex) {
             LOG.warn("Failed to load history session: " + ex.getMessage(), ex);
             context.callJavaScript("historyLoadComplete");
-            context.callJavaScript("addErrorMessage", "Failed to load history session: " + ex.getMessage());
+            context.callJavaScript("addErrorMessage",
+                SessionRuntimeMessages.historyResumeFailed(currentProvider, ex));
         }
     }
 

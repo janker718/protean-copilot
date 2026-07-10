@@ -5,13 +5,14 @@ import com.protean.copilot.handler.core.HandlerContext;
 import com.protean.copilot.handler.core.MessageDispatcher;
 import com.protean.copilot.handler.core.MessageHandler;
 import com.protean.copilot.handler.diff.DiffHandler;
+import com.protean.copilot.handler.DependencyHandler;
 import com.protean.copilot.handler.HistoryHandler;
 import com.protean.copilot.handler.PermissionHandler;
 import com.protean.copilot.handler.SettingsHandler;
 import com.protean.copilot.permission.PermissionService;
-import com.protean.copilot.provider.claude.ClaudeSDKBridge;
 import com.protean.copilot.session.ChatSession;
 import com.protean.copilot.session.SessionLifecycleManager;
+import com.protean.copilot.session.SessionRuntimeMessages;
 import com.protean.copilot.session.StreamMessageCoalescer;
 import com.protean.copilot.settings.CodemossSettingsService;
 import com.protean.copilot.settings.SettingsService;
@@ -135,8 +136,9 @@ public class ChatWindowDelegate {
         historyHandler = histHandler;
         dispatcher.registerHandler(histHandler);
         dispatcher.registerHandler(new SettingsHandler(context));
+        dispatcher.registerHandler(new DependencyHandler(context));
 
-        // 为用户消息注册处理器 —— 通过 ClaudeSDKBridge 转发到 claude-code-sdk
+        // 为用户消息注册处理器 —— 通过 session/provider 通用层转发到对应 SDK bridge
         dispatcher.registerHandler(new MessageHandler() {
             @Override
             public boolean handle(String type, String content) {
@@ -171,11 +173,10 @@ public class ChatWindowDelegate {
                                 text = content;
                             }
 
-                            // 获取 ClaudeSDKBridge 实例
-                            ClaudeSDKBridge bridge = context.sdkBridge.getClaudeBridge();
-                            if (bridge == null || !bridge.isRunning()) {
+                            String activeProvider = getProviderManager().getActiveProvider();
+                            if (!context.sdkBridge.isProviderRunning(activeProvider)) {
                                 context.callJavaScript("addErrorMessage",
-                                    "Claude SDK 桥接未运行。请检查 Node.js 和 claude-code-sdk 是否正确安装。");
+                                    SessionRuntimeMessages.bridgeUnavailable(activeProvider));
                                 context.callJavaScript("showLoading", "false");
                                 return true;
                             }
@@ -183,7 +184,7 @@ public class ChatWindowDelegate {
                             // 获取会话信息
                             ChatSession session = context.getSession();
                             session.setModel(context.getCurrentModel());
-                            session.setProvider(getProviderManager().getActiveProvider());
+                            session.setProvider(activeProvider);
 
                             session.send(
                                 text,
@@ -201,7 +202,10 @@ public class ChatWindowDelegate {
                                             : ex.getClass().getSimpleName();
                                         LOG.warn("查询失败: " + errMsg);
                                         context.callJavaScript("addErrorMessage",
-                                            "查询失败: " + errMsg);
+                                            SessionRuntimeMessages.requestFailed(
+                                                session.getProvider(),
+                                                ex
+                                            ));
                                         context.callJavaScript("showLoading", "false");
                                     }
                                 });
@@ -210,7 +214,10 @@ public class ChatWindowDelegate {
                         } catch (Exception e) {
                             LOG.warn("处理用户消息失败: " + e.getMessage(), e);
                             context.callJavaScript("addErrorMessage",
-                                "处理消息失败: " + e.getMessage());
+                                SessionRuntimeMessages.requestFailed(
+                                    context.getSession() != null ? context.getSession().getProvider() : null,
+                                    e
+                                ));
                             context.callJavaScript("showLoading", "false");
                             return true;
                         }

@@ -63,7 +63,10 @@ public class SessionMessageOrchestrator {
             pushMessagesToFrontend(parsedMessages);
         }).whenComplete((v, ex) -> {
             session.setLoading(false);
-            session.setError(ex == null ? null : rootMessage(ex));
+            session.setError(ex == null ? null : SessionRuntimeMessages.historyResumeFailed(
+                session.getProvider(),
+                rootMessage(ex)
+            ));
         });
     }
 
@@ -74,7 +77,7 @@ public class SessionMessageOrchestrator {
         }
         switch (functionName) {
             case "onBridgeReady" -> callback.onBridgeReady(arg(args, 0), arg(args, 1));
-            case "updateSessionId" -> session.setSessionInfo(arg(args, 0), null);
+            case "updateSessionId" -> handleSessionIdUpdate(arg(args, 0), arg(args, 1));
             case "onStreamStart" -> {
                 replayDeduplicator.reset();
                 callback.onStreamStart();
@@ -225,6 +228,19 @@ public class SessionMessageOrchestrator {
             array.add(item);
         }
         return GSON.toJson(array);
+    }
+
+    private void handleSessionIdUpdate(String newSessionId, String requestSessionId) {
+        if (newSessionId == null || newSessionId.isBlank()) {
+            return;
+        }
+        String currentSessionId = session.getSessionId();
+        if (requestSessionId == null || requestSessionId.isBlank()
+            || currentSessionId == null || currentSessionId.isBlank()
+            || currentSessionId.equals(requestSessionId)
+            || currentSessionId.equals(newSessionId)) {
+            session.setSessionInfo(newSessionId, null);
+        }
     }
 
     private String arg(String[] args, int index) {

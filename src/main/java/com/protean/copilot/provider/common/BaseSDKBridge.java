@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.protean.copilot.session.SessionRuntimeMessages;
 import com.intellij.openapi.diagnostic.Logger;
 
 import java.io.*;
@@ -125,7 +126,7 @@ public abstract class BaseSDKBridge {
      */
     protected static class SessionState {
         /** 会话唯一标识 */
-        final String sessionId;
+        volatile String sessionId;
 
         /** 工作目录 */
         final String cwd;
@@ -435,17 +436,14 @@ public abstract class BaseSDKBridge {
         state.streaming = true;
 
         String effectiveModel = (model != null && !model.isEmpty()) ? model : getDefaultModel();
-
-        JsonObject msg = new JsonObject();
-        msg.addProperty("type", "query");
-        msg.addProperty("sessionId", sessionId);
-        msg.addProperty("prompt", prompt);
-        msg.addProperty("cwd", cwd);
-        msg.addProperty("model", effectiveModel);
-        msg.addProperty("permissionMode", permissionMode != null ? permissionMode : "bypassPermissions");
-        if (reasoningEffort != null && !reasoningEffort.isEmpty()) {
-            msg.addProperty("reasoningEffort", reasoningEffort);
-        }
+        JsonObject msg = buildQueryMessage(
+            sessionId,
+            prompt,
+            cwd,
+            effectiveModel,
+            permissionMode != null ? permissionMode : "bypassPermissions",
+            reasoningEffort
+        );
 
         try {
             writeMessage(msg);
@@ -516,11 +514,7 @@ public abstract class BaseSDKBridge {
         state.responseFuture = future;
         state.streaming = true;
 
-        JsonObject msg = new JsonObject();
-        msg.addProperty("type", "resume");
-        msg.addProperty("sessionId", sessionId);
-        msg.addProperty("prompt", prompt);
-        msg.addProperty("cwd", cwd);
+        JsonObject msg = buildResumeMessage(sessionId, prompt, cwd);
 
         try {
             writeMessage(msg);
@@ -551,7 +545,7 @@ public abstract class BaseSDKBridge {
     /**
      * 向 Node.js 子进程写入一条 JSON 消息。线程安全。
      */
-    private void writeMessage(JsonObject message) throws IOException {
+    protected void writeMessage(JsonObject message) throws IOException {
         writeLine(GSON.toJson(message));
     }
 
@@ -640,8 +634,29 @@ public abstract class BaseSDKBridge {
             : "unknown";
         boolean sdkAvailable = message.has("sdkAvailable")
             && message.get("sdkAvailable").getAsBoolean();
+        String runtime = readOptionalString(message, "runtime");
+        String sdkPackage = readOptionalString(message, "sdkPackage");
+        String hint = readOptionalString(message, "hint");
+        String importError = readOptionalString(message, "importError");
 
-        LOG.info("Node.js 桥接已就绪: SDK版本=" + version + ", SDK可用=" + sdkAvailable);
+        StringBuilder summary = new StringBuilder("Node.js 桥接已就绪: provider=")
+            .append(getProviderName())
+            .append(", SDK版本=").append(version)
+            .append(", SDK可用=").append(sdkAvailable);
+        if (runtime != null) {
+            summary.append(", runtime=").append(runtime);
+        }
+        if (sdkPackage != null) {
+            summary.append(", package=").append(sdkPackage);
+        }
+        LOG.info(summary.toString());
+        if (!sdkAvailable) {
+            LOG.warn(getProviderName() + " SDK 不可用"
+                + (importError != null ? ", importError=" + importError : "")
+                + (hint != null ? ", hint=" + hint : ""));
+            invokeJsCallback("updateStatus", getProviderName() + " runtime not ready");
+            invokeJsCallback("addErrorMessage", buildUnavailableMessage(version, hint, importError));
+        }
 
         invokeJsCallback("onBridgeReady", version, String.valueOf(sdkAvailable));
     }
@@ -650,12 +665,19 @@ public abstract class BaseSDKBridge {
     private void handleSessionCreated(JsonObject message) {
         String sessionId = message.has("sessionId")
             ? message.get("sessionId").getAsString() : null;
+        String requestSessionId = message.has("requestSessionId")
+            ? message.get("requestSessionId").getAsString() : null;
         String cwd = message.has("cwd")
             ? message.get("cwd").getAsString() : null;
 
         if (sessionId != null) {
+            remapSessionState(requestSessionId, sessionId, cwd);
             LOG.info("会话已创建: sessionId=" + sessionId + ", cwd=" + cwd);
-            invokeJsCallback("updateSessionId", sessionId);
+            if (requestSessionId != null && !requestSessionId.isBlank()) {
+                invokeJsCallback("updateSessionId", sessionId, requestSessionId);
+            } else {
+                invokeJsCallback("updateSessionId", sessionId);
+            }
         }
     }
 
@@ -722,7 +744,10 @@ public abstract class BaseSDKBridge {
     /** 处理状态更新消息。 */
     private void handleStatus(JsonObject message) {
         String text = message.has("text") ? message.get("text").getAsString() : "";
-        LOG.info("状态: " + text);
+        if (text.isBlank()) {
+            return;
+        }
+        LOG.info("状态[" + getProviderName() + "]: " + text);
         invokeJsCallback("updateStatus", text);
     }
 
@@ -760,20 +785,32 @@ public abstract class BaseSDKBridge {
             ? message.get("message").getAsString() : "未知错误";
         String errorCode = message.has("code")
             ? message.get("code").getAsString() : "UNKNOWN";
+        String sessionId = readOptionalString(message, "sessionId");
+        String phase = readOptionalString(message, "phase");
+        String hint = readOptionalString(message, "hint");
+        String details = readOptionalString(message, "details");
+        boolean recoverable = message.has("recoverable") && message.get("recoverable").getAsBoolean();
+        String uiMessage = formatBridgeError(errorCode, errorMsg, phase, hint);
 
-        LOG.error("SDK 错误: [" + errorCode + "] " + errorMsg);
+        LOG.warn("SDK 错误[" + getProviderName() + "]: [" + errorCode + "] " + errorMsg
+            + (sessionId != null ? ", sessionId=" + sessionId : "")
+            + (phase != null ? ", phase=" + phase : "")
+            + (recoverable ? ", recoverable=true" : "")
+            + (details != null ? ", details=" + details : ""));
 
-        invokeJsCallback("addErrorMessage", errorMsg);
+        invokeJsCallback("addErrorMessage", uiMessage);
+        if (recoverable) {
+            invokeJsCallback("updateStatus", SessionRuntimeMessages.runtimeRecovered(getProviderName()));
+        }
         invokeJsCallback("showLoading", "false");
 
-        for (SessionState state : activeSessions.values()) {
-            if (state.streaming) {
-                state.streaming = false;
-                if (state.responseFuture != null && !state.responseFuture.isDone()) {
-                    state.responseFuture.completeExceptionally(
-                        new RuntimeException("[" + errorCode + "] " + errorMsg));
-                }
-            }
+        if (sessionId != null && !sessionId.isBlank()) {
+            failSession(sessionId, "[" + errorCode + "] " + errorMsg);
+            return;
+        }
+
+        for (String activeSessionId : activeSessions.keySet()) {
+            failSession(activeSessionId, "[" + errorCode + "] " + errorMsg);
         }
     }
 
@@ -830,11 +867,11 @@ public abstract class BaseSDKBridge {
         activeSessions.put("__prewarm__", state);
 
         JsonObject msg = new JsonObject();
-        msg.addProperty("type", "prewarm");
-        msg.addProperty("cwd", cwd != null ? cwd : System.getProperty("user.dir"));
-        msg.addProperty("model", model != null ? model : getDefaultModel());
-        msg.addProperty("permissionMode",
-            permissionMode != null ? permissionMode : "bypassPermissions");
+        msg = buildPrewarmMessage(
+            cwd != null ? cwd : System.getProperty("user.dir"),
+            model != null ? model : getDefaultModel(),
+            permissionMode != null ? permissionMode : "bypassPermissions"
+        );
 
         try {
             writeMessage(msg);
@@ -870,8 +907,7 @@ public abstract class BaseSDKBridge {
 
         if (!shutdownRequested.get()) {
             invokeJsCallback("addErrorMessage",
-                getProviderName() + " SDK 桥接进程意外退出（退出码：" + exitCode
-                + "）。请检查 Node.js 和 SDK 是否正确安装。");
+                SessionRuntimeMessages.bridgeProcessExited(getProviderName(), exitCode));
             invokeJsCallback("showLoading", "false");
         }
 
@@ -1002,6 +1038,99 @@ public abstract class BaseSDKBridge {
             cb.callJavaScript(functionName, args);
         } catch (Exception e) {
             LOG.warn("调用 JS 回调 '" + functionName + "' 失败: " + e.getMessage());
+        }
+    }
+
+    protected JsonObject buildQueryMessage(
+        String sessionId,
+        String prompt,
+        String cwd,
+        String model,
+        String permissionMode,
+        String reasoningEffort
+    ) {
+        JsonObject msg = new JsonObject();
+        msg.addProperty("type", "query");
+        msg.addProperty("sessionId", sessionId);
+        msg.addProperty("prompt", prompt);
+        msg.addProperty("cwd", cwd);
+        msg.addProperty("model", model);
+        msg.addProperty("permissionMode", permissionMode);
+        if (reasoningEffort != null && !reasoningEffort.isEmpty()) {
+            msg.addProperty("reasoningEffort", reasoningEffort);
+        }
+        return msg;
+    }
+
+    protected JsonObject buildResumeMessage(String sessionId, String prompt, String cwd) {
+        JsonObject msg = new JsonObject();
+        msg.addProperty("type", "resume");
+        msg.addProperty("sessionId", sessionId);
+        msg.addProperty("prompt", prompt);
+        msg.addProperty("cwd", cwd);
+        return msg;
+    }
+
+    protected JsonObject buildPrewarmMessage(String cwd, String model, String permissionMode) {
+        JsonObject msg = new JsonObject();
+        msg.addProperty("type", "prewarm");
+        msg.addProperty("cwd", cwd);
+        msg.addProperty("model", model);
+        msg.addProperty("permissionMode", permissionMode);
+        return msg;
+    }
+
+    protected void remapSessionState(String requestSessionId, String actualSessionId, String cwd) {
+        if (actualSessionId == null || actualSessionId.isBlank()) {
+            return;
+        }
+
+        SessionState existingActual = activeSessions.get(actualSessionId);
+        if (existingActual != null) {
+            existingActual.sessionId = actualSessionId;
+            return;
+        }
+
+        if (requestSessionId != null && !requestSessionId.isBlank() && !requestSessionId.equals(actualSessionId)) {
+            SessionState pending = activeSessions.remove(requestSessionId);
+            if (pending != null) {
+                pending.sessionId = actualSessionId;
+                activeSessions.put(actualSessionId, pending);
+                return;
+            }
+        }
+
+        activeSessions.computeIfAbsent(actualSessionId, id -> new SessionState(id, cwd));
+    }
+
+    private void failSession(String sessionId, String errorMessage) {
+        SessionState state = activeSessions.get(sessionId);
+        if (state == null) {
+            return;
+        }
+        state.streaming = false;
+        if (state.responseFuture != null && !state.responseFuture.isDone()) {
+            state.responseFuture.completeExceptionally(new RuntimeException(errorMessage));
+        }
+    }
+
+    private String buildUnavailableMessage(String version, String hint, String importError) {
+        return SessionRuntimeMessages.sdkUnavailable(getProviderName(), version, hint, importError);
+    }
+
+    private String formatBridgeError(String code, String message, String phase, String hint) {
+        return SessionRuntimeMessages.bridgeError(getProviderName(), code, message, phase, hint);
+    }
+
+    protected String readOptionalString(JsonObject message, String key) {
+        if (message == null || key == null || !message.has(key) || message.get(key).isJsonNull()) {
+            return null;
+        }
+        try {
+            String value = message.get(key).getAsString();
+            return value == null || value.isBlank() ? null : value;
+        } catch (Exception ignored) {
+            return null;
         }
     }
 }

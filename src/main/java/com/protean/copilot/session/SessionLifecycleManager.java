@@ -75,7 +75,8 @@ public class SessionLifecycleManager {
             LOG.error("Failed to create new session: " + ex.getMessage(), ex);
             ApplicationManager.getApplication().invokeLater(() -> {
                 host.callJavaScript("historyLoadComplete");
-                host.callJavaScript("updateStatus", "Failed to create new session: " + ex.getMessage());
+                host.callJavaScript("addErrorMessage", SessionRuntimeMessages.newSessionCreateFailed(ex));
+                host.callJavaScript("updateStatus", SessionRuntimeMessages.newSessionCreateFailed(ex));
             });
             return null;
         });
@@ -137,7 +138,8 @@ public class SessionLifecycleManager {
                 ApplicationManager.getApplication().invokeLater(() -> {
                     host.callJavaScript("historyLoadComplete");
                     if (ex != null) {
-                        host.callJavaScript("addErrorMessage", "Failed to load history session: " + ex.getMessage());
+                        host.callJavaScript("addErrorMessage",
+                            SessionRuntimeMessages.historyResumeFailed(newSession.getProvider(), ex));
                     }
                 });
             });
@@ -145,7 +147,8 @@ public class SessionLifecycleManager {
             LOG.error("Failed to load history session: " + ex.getMessage(), ex);
             ApplicationManager.getApplication().invokeLater(() -> {
                 host.callJavaScript("historyLoadComplete");
-                host.callJavaScript("addErrorMessage", "Failed to load history session: " + ex.getMessage());
+                host.callJavaScript("addErrorMessage",
+                    SessionRuntimeMessages.historyResumeFailed(request.provider(), ex));
             });
             return null;
         });
@@ -163,7 +166,7 @@ public class SessionLifecycleManager {
 
         ApplicationManager.getApplication().invokeLater(() -> {
             host.callJavaScript("historyLoadComplete");
-            host.callJavaScript("updateStatus", "New session created successfully");
+            host.callJavaScript("updateStatus", SessionRuntimeMessages.newSessionCreated());
         });
     }
 

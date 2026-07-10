@@ -140,6 +140,12 @@ export interface DependencyVersionResult {
 export interface NodeEnvironmentStatus {
   /** Whether available */
   available: boolean;
+  /** Resolved node path */
+  nodePath?: string;
+  /** Node.js version */
+  version?: string;
+  /** npm version */
+  npmVersion?: string;
   /** Error message */
   error?: string;
 }

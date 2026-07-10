@@ -8,6 +8,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -118,7 +119,8 @@ public class NodeDetector {
 
     private String detectNpmVersion() {
         try {
-            Process p = new ProcessBuilder("npm", "--version")
+            String npmExecutable = findNpmExecutable(cachedNodePath != null ? cachedNodePath : "node");
+            Process p = new ProcessBuilder(npmExecutable, "--version")
                 .redirectErrorStream(true).start();
             try (BufferedReader r = new BufferedReader(
                     new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
@@ -127,8 +129,44 @@ public class NodeDetector {
         } catch (Exception ignored) { return null; }
     }
 
+    public String findNodeExecutable() {
+        if (cachedNodePath != null && !cachedNodePath.isBlank()) {
+            return cachedNodePath;
+        }
+        NodeDetectionResult detected = detectNodeWithDetails();
+        if (detected.available() && detected.nodePath() != null && !detected.nodePath().isBlank()) {
+            return detected.nodePath();
+        }
+        return isWindows() ? "node.exe" : "node";
+    }
+
+    public String findNpmExecutable(String nodePath) {
+        String fallback = isWindows() ? "npm.cmd" : "npm";
+        if (nodePath == null || nodePath.isBlank()) {
+            return fallback;
+        }
+
+        try {
+            Path node = Path.of(nodePath);
+            if (Files.isRegularFile(node)) {
+                Path sibling = node.resolveSibling(isWindows() ? "npm.cmd" : "npm");
+                if (Files.isRegularFile(sibling)) {
+                    return sibling.toString();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        return fallback;
+    }
+
     // ---- 缓存访问 ----
 
     public String getCachedNodeVersion() { return cachedNodeVersion; }
     public String getCachedNodePath() { return cachedNodePath; }
+    public String getCachedNpmVersion() { return cachedNpmVersion; }
+
+    private boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    }
 }

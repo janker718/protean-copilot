@@ -3,7 +3,21 @@
     {
       "code": "codexThreadResume",
       "match": {
-        "regex": "thread/resume"
+        "regex": "session resume failed|thread/resume"
+      },
+      "solutions": []
+    },
+    {
+      "code": "permissionDenied",
+      "match": {
+        "regex": "permission request was denied|approval denied|permission denied"
+      },
+      "solutions": []
+    },
+    {
+      "code": "sandboxDenied",
+      "match": {
+        "regex": "sandbox denied|read-only sandbox|write access"
       },
       "solutions": []
     },

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 const PROVIDER_TO_SDK: Record<string, string> = {
   claude: 'claude-sdk',
@@ -9,6 +9,7 @@ const PROVIDER_TO_SDK: Record<string, string> = {
 };
 
 type SdkStatus = Record<string, { installed?: boolean; status?: string }>;
+const SDK_STATUS_LOAD_TIMEOUT_MS = 5000;
 
 /**
  * Usage % / token counters and SDK install status. `isSdkInstalled(providerId)`
@@ -22,6 +23,17 @@ export function useUsageTracking() {
   const [usageMaxTokens, setUsageMaxTokens] = useState<number | undefined>(undefined);
   const [sdkStatus, setSdkStatus] = useState<SdkStatus>({});
   const [sdkStatusLoaded, setSdkStatusLoaded] = useState(false);
+
+  useEffect(() => {
+    if (sdkStatusLoaded) return undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      console.warn('[Frontend] SDK status load timed out; falling back to unloaded state');
+      setSdkStatusLoaded(true);
+    }, SDK_STATUS_LOAD_TIMEOUT_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [sdkStatusLoaded]);
 
   const isSdkInstalled = useCallback(
     (providerId: string): boolean => {
