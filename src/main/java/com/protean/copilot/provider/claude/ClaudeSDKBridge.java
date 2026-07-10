@@ -208,7 +208,7 @@ public class ClaudeSDKBridge extends BaseSDKBridge {
             model = getDefaultModel();
         }
         if (permissionMode == null || permissionMode.isEmpty()) {
-            permissionMode = "bypassPermissions";
+            permissionMode = "default";
         }
         return super.query(sessionId, prompt, cwd, model, permissionMode, reasoningEffort);
     }

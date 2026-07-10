@@ -8,6 +8,7 @@ import com.protean.copilot.handler.diff.DiffHandler;
 import com.protean.copilot.handler.DependencyHandler;
 import com.protean.copilot.handler.FrontendActionCoverageHandler;
 import com.protean.copilot.handler.HistoryHandler;
+import com.protean.copilot.handler.NodeProcessHandler;
 import com.protean.copilot.handler.PermissionHandler;
 import com.protean.copilot.handler.SettingsHandler;
 import com.protean.copilot.handler.WindowEventHandler;
@@ -160,6 +161,7 @@ public class ChatWindowDelegate {
             host.getSessionLifecycleManager()::createNewSession
         ));
         dispatcher.registerHandler(new FrontendActionCoverageHandler(context));
+        dispatcher.registerHandler(new NodeProcessHandler(context));
 
         // 为用户消息注册处理器 —— 通过 session/provider 通用层转发到对应 SDK bridge
         dispatcher.registerHandler(new MessageHandler() {
@@ -173,7 +175,7 @@ public class ChatWindowDelegate {
                         try {
                             // 解析消息内容
                             String text;
-                            String permissionMode = "bypassPermissions";
+                            String permissionMode = "default";
                             String reasoningEffort = null;
                             List<ChatSession.Attachment> attachments = null;
 
@@ -308,6 +310,7 @@ public class ChatWindowDelegate {
             permissionService.setPermissionMode(host.getSettingsService().getPermissionMode());
             if (permissionHandler != null) {
                 permissionHandler.bindPermissionService(permissionService);
+                permissionHandler.setPermissionDeniedCallback(this::interruptDueToPermissionDenial);
                 permissionService.setOnPermissionRequestedCallback(permissionHandler::showPermissionDialog);
                 permissionService.registerDialogShower(host.getProject(), permissionHandler::showFrontendPermissionDialog);
                 permissionService.registerAskUserQuestionDialogShower(host.getProject(), permissionHandler::showAskUserQuestionDialog);
@@ -425,6 +428,27 @@ public class ChatWindowDelegate {
             default -> TabAnswerStatus.IDLE;
         };
         updateTabStatus(resolved);
+    }
+
+    private void interruptDueToPermissionDenial() {
+        ChatSession session = host.getSession();
+        if (session == null) {
+            return;
+        }
+        session.interrupt().thenRun(() -> ApplicationManager.getApplication().invokeLater(() -> {
+            host.callJavaScript("onPermissionDenied");
+            host.callJavaScript("onStreamEnd");
+            host.callJavaScript("showLoading", "false");
+            onTabStatusChanged("completed");
+        })).exceptionally(ex -> {
+            LOG.warn("Failed to interrupt session after permission denial: " + ex.getMessage(), ex);
+            ApplicationManager.getApplication().invokeLater(() -> {
+                host.callJavaScript("onPermissionDenied");
+                host.callJavaScript("showLoading", "false");
+                host.callJavaScript("addErrorMessage", SessionRuntimeMessages.requestFailed(session.getProvider(), ex));
+            });
+            return null;
+        });
     }
 
     /**

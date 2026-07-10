@@ -1,577 +1,439 @@
 # 开发进度快照
 
-更新时间：2026-07-10（Codex runtime 恢复链路回归后）
+更新时间：2026-07-11
 
-本文档基于两个仓库当前代码状态整理：
+本文档以当前仓库 `/Users/janker/Documents/ProteanCopilot` 为主，并参考 `/Users/janker/Documents/code/github/jetbrains-cc-gui` 的现状，目的是回答三件事：
 
-- 当前项目：`/Users/janker/Documents/ProteanCopilot`
-- 参考项目：`/Users/janker/Documents/code/github/jetbrains-cc-gui`
-
-目标：
-
-1. 梳理当前项目与参考项目的结构对应关系。
-2. 说明已经对齐、部分对齐、尚未对齐的能力。
-3. 给出下一阶段更准确的开发优先级。
+1. `ProteanCopilot` 现在到底开发到了哪一层。
+2. 和 `jetbrains-cc-gui` 相比，已经补齐了什么、还差什么。
+3. 后续应该优先补“运行稳定性”还是继续铺“功能广度”。
 
 ---
 
 ## 一句话结论
 
-`ProteanCopilot` 已经从单 Claude 聊天原型，推进到了：
+`ProteanCopilot` 已经明显越过“插件原型期”，进入了“多 Provider Agent 插件的第一轮可运行实现期”。
 
-- IntelliJ 插件壳稳定
-- Claude 主链可用
-- history / permission / session 三层已形成通用骨架
-- Codex 的 UI、历史读取、session adapter、provider 入口已接入
-- Codex bridge 已进入首轮真实运行接入
-- Codex dependency backend 已完成首轮锁版与回归收口
+更准确地说：
 
-但和参考项目相比，当前最明显的现实状态不是“没有多 Provider”，而是：
+- IntelliJ 插件壳、JCEF/WebView、消息分发、会话编排、历史入口、权限入口、Claude 主链已经成型。
+- Codex 不是“还没开始”，而是已经完成了 bridge、session、history、dependency 的第一轮接入。
+- 当前最大差距不再是有没有架构骨架，而是运行时深度、产品化周边能力、以及对真实 IDE 场景的收口程度。
 
-- `多 Provider 结构已起`
-- `Codex 已跨过结构接入，正在做运行稳定化`
-- `@openai/codex-sdk` 已完成真实安装、锁版、lockfile 同步与运行环境说明
-- `首页 Checking SDK status` 卡住问题已完成首轮修复
-- `通用层已抽出，但运行时分层深度还不够`
+如果用工程语言概括当前阶段：
 
-也就是说，当前项目最大的差距已经从“有没有骨架”，转成了“骨架上的运行时稳定性、权限闭环、provider 深度是否真正站稳”。
+`ProteanCopilot` 已经搭出与参考项目同方向的主干，但离 `jetbrains-cc-gui` 那种“功能完整、边角丰富、长期演化过”的成熟度还有一段距离。
 
 ---
 
-## 当前客观规模
+## 当前规模对照
 
 | 维度 | ProteanCopilot | jetbrains-cc-gui |
 |---|---:|---:|
 | Java 主代码文件数 | 141 | 268 |
-| Java 测试文件数 | 24 | 86 |
-| WebView `ts/tsx` 文件数 | 402 | - |
-| WebView 测试文件数 | 84 | - |
-| Node/bridge JS 文件数 | 2 个 bridge resource | 77 个 ai-bridge JS/CJS/MJS |
-| Claude provider | 已接主链 | 完整 |
-| Codex provider | 首轮 bridge 已接通，依赖/稳定化补齐中 | 完整 |
-| history provider source | Claude + Codex | Claude + Codex |
-| session router / orchestrator | 已有 | 完整 |
-| permission 闭环 | 第一轮成形 | 更完整 |
+| Java 测试文件数 | 24 | 87 |
+| WebView `ts/tsx` 文件数 | 402 | 约 500+ |
+| WebView 测试文件数 | 84 | 明显更多 |
+| Provider | Claude + Codex | Claude + Codex |
+| 历史数据源 | Claude + Codex | Claude + Codex |
+| Session 编排层 | 已有 | 更成熟 |
+| Permission 子系统 | 已落地第一轮 | 更完整 |
+| Dependency 管理 | 已落地第一轮 | 更完整 |
 
-本轮进度判断基于当前工作树代码状态与本轮重新执行的验证结果：
+这组数字说明两件事：
 
-- `npm install @openai/codex-sdk@0.143.0 --save-exact` 已在 `webview/` 实际执行完成
-- `npm ls @openai/codex-sdk` 已确认锁定为 `0.143.0`
-- `./gradlew test --tests com.protean.copilot.provider.common.BaseSDKBridgeTest --tests com.protean.copilot.provider.codex.CodexSDKBridgeTest --tests com.protean.copilot.dependency.DependencyManagerTest compileJava` 已通过
-- `node --check src/main/resources/bridge/codex-sdk-bridge.mjs` 已通过
-- `npx vitest run src/components/settings/DependencySection/index.test.tsx src/hooks/useWindowCallbacks.test.ts src/hooks/useDialogCountdownTimeout.test.tsx src/components/PermissionDialog.test.tsx src/components/AskUserQuestionDialog.test.tsx src/components/PlanApprovalDialog.test.tsx` 已通过
-- `npx tsc -p tsconfig.test.json --noEmit` 已通过
-- `./gradlew test --tests com.protean.copilot.session.SessionRuntimeMessagesTest --tests com.protean.copilot.session.SessionMessageOrchestratorTest --tests com.protean.copilot.session.SessionSendServiceTest --tests com.protean.copilot.session.SessionProviderRouterTest --tests com.protean.copilot.session.SessionLoadServiceTest --tests com.protean.copilot.session.HistorySessionLoadRequestTest --tests com.protean.copilot.handler.PermissionHandlerTest --tests com.protean.copilot.dependency.DependencyManagerTest compileJava` 已通过
-- `cd webview && npx vitest run src/hooks/useWindowCallbacks.test.ts src/hooks/useSessionManagement.test.ts src/components/PermissionDialog.test.tsx src/components/settings/DependencySection/index.test.tsx src/components/settings/DependencySection/versioning.test.ts src/components/settings/CodexProviderSection/CodexProviderSection.test.tsx src/components/settings/hooks/useCodexProviderManagement.test.ts src/utils/errorMatcher.test.ts` 已通过
-- `./gradlew runIde` 已成功返回，可确认当前插件沙箱可启动
-- `cd webview && npx vitest run src/hooks/useWindowCallbacks.test.ts src/hooks/providers/useUsageTracking.test.ts` 已通过
-- `./gradlew compileJava` 已通过
-- `./gradlew test` 已通过；新增的 `StreamMessageCoalescerTest` 覆盖模型消息快照在 Java -> JCEF 边界的 JSON 传输契约
-- `./gradlew test` 最近一次全量通过；`BaseSDKBridgeTest`、`CodexSDKBridgeTest`、`SessionMessageOrchestratorTest`、`SessionSendServiceTest`、`SessionRuntimeMessagesTest` 覆盖本轮 Codex runtime 恢复改动
-- `cd webview && npm test` 最近一次全量通过：`84` 个测试文件、`689` 个用例，并完成测试 TypeScript 编译检查
-- `node --check src/main/resources/bridge/codex-sdk-bridge.mjs` 与 `node --check src/main/resources/bridge/claude-sdk-bridge.mjs` 最近一次均通过
-- `./gradlew runIde` 最近一次成功返回；当前插件 sandbox 可按最新产物启动
-
-本轮额外确认：
-
-- Settings 的 SDK 状态回调不再把 JSON 二次转义；`DependencyHandler` 直接向 WebView 传递 JSON 对象。
-- `DependencySection` 会消费页面初始化前积压的状态、版本与更新事件，并为状态和版本查询提供 `5s` / `8s` 超时兜底。
-- `cd webview && npx vitest run src/components/settings/DependencySection/index.test.tsx` 最近一次已通过（8 个用例），覆盖积压事件与超时兜底。
-- 本地 IDE 曾选中指向 `doc/` 的临时 Gradle 配置，导致尝试执行不存在的 `/gradlew`；该工作区配置已改回共享的项目根 `.run/Run IDE with Plugin` 配置。此项是本机运行入口排障，不属于共享源码功能变更。
-
-本轮最新流式链路复核：
-
-- 模型返回消息时出现的 `SyntaxError: Expected property name or '}' in JSON at position 2` 已定位为 Java 侧双重转义，而非模型响应、SDK 配置或 provider 返回格式问题。
-- [StreamMessageCoalescer.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/StreamMessageCoalescer.java) 曾先转义完整消息 JSON，随后 [ProteanChatWindow.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/ui/toolwindow/ProteanChatWindow.java) 在 JCEF 执行边界再次转义，导致 WebView 收到以 `{\\` 开头的伪 JSON。
-- 现已移除合并器中的预转义，只保留 JCEF 边界的一次字符串转义；[StreamMessageCoalescerTest.java](/Users/janker/Documents/ProteanCopilot/src/test/java/com/protean/copilot/session/StreamMessageCoalescerTest.java) 使用含嵌套对象、引号和换行的消息快照回归验证。
-- 该修复已通过全量 Gradle 测试和 Node 侧等价复现验证；仍需在 IDE 中以真实 Claude/Codex 流式响应完成手工确认。
-
-但需要明确区分：
-
-- 上述通过项已覆盖本轮新增的 `dependency/*`、`DependencyHandler`、`NodeDetector`、`BaseSDKBridge` 与 `codex-sdk-bridge.mjs` 改动
-- Gradle 验证过程同时重建了 WebView 产物并同步到了 `src/main/resources/html/protean-chat.html`
-- 这次不是只看静态代码，而是补做了真实 SDK 安装、Java 定向回归、WebView 定向回归与测试 TS 编译检查
-- 本轮还新增了 Codex runtime 恢复链路的 Java/WebView 定向验证与错误口径统一回归
-
-但本次仍未完成的，是更高层的人工回归与更宽的系统测试面：
-
-- IDE 内真实 WebView 手工联调：`query / resume / interrupt / approval / sandbox / timeout / failure` 全场景点击回归
-- 带真实 Codex provider 凭据与 thread 恢复数据的端到端手工验证
-- 真实 IDE 账号态下的 Java / WebView 联动回归；自动化全量测试已经通过，但不能替代真实 provider 的网络、凭据与工具授权行为
-
-因此本文档中的“已完成”表示：
-
-- 代码已存在
-- 接口边界已落地
-- 结构上已经进入真实实现阶段
-- 或者已经有自动化回归证据支撑
-
-不表示行为已经与参考项目等价，也不表示 Codex 相关链路已经完成系统级稳定性验证。当前文档里凡是明确写“仍未完成”“待手工回归”“待端到端验证”的部分，都应理解为：代码层已进入实现态，但系统级稳定性还在继续收口。
-
-补充说明：
-
-- 本轮更细的 Codex 运行回归证据已单独整理到
-  [codex-runtime-regression.md](/Users/janker/Documents/ProteanCopilot/doc/codex-runtime-regression.md)
+- 当前项目已经不是“小玩具仓库”，而是有明确分层和测试基础的中等规模插件工程。
+- 和参考项目相比，差距主要在“系统厚度”和“产品配套能力”，不是 0 到 1 的缺失。
 
 ---
 
-## 结构对照
+## 与参考项目的整体对照结论
 
-### 已经形成的主干分层
+### 已经对齐到同一方向的部分
 
-当前项目已具备这些与参考项目方向一致的核心边界：
+- 插件主壳：Tool Window、Startup、Status Bar、JCEF 桥接都已具备。
+- 前后端通信：Java `handler/core` 分发模型已经形成，WebView 事件回调链也已建立。
+- Session 主链：`SessionSendService`、`SessionLifecycleManager`、`SessionMessageOrchestrator`、`SessionProviderRouter` 已经组成独立运行层。
+- Provider 抽象：`BaseSDKBridge` + `provider/claude` + `provider/codex` 的结构已经明确，不再是单 Provider 直连。
+- 历史体系：`history`、`handler/history`、`provider/*/History*` 都已存在，说明这条线已经进入实现态。
+- 权限体系：`permission` 包不只是壳，已经包含 watcher、router、decision store、manager、file protocol 等组件。
 
-- `bridge`
-- `cache`
-- `handler/core`
-- `handler/history`
-- `handler/diff`
-- `handler/provider`
-- `history`
-- `permission`
-- `provider/common`
-- `provider/claude`
-- `provider/codex`
-- `session`
-- `settings`
-- `startup`
-- `ui/toolwindow`
-- `util`
+### 仍然明显落后的部分
 
-这说明当前项目已经不再是“窗口类包打天下”的结构，主干分层基本已成型。
-
-### 仍偏薄或未对齐的子系统
-
-相对参考项目，当前还明显偏薄：
-
-- 更完整的 provider 运行时服务层
-- 更完整的 skill / prompt / MCP 后端闭环
-- terminal / watcher / detached UI 等横向能力
-- 更完整的 Node ai-bridge 分层
-- 更高密度测试面
-
-结论：
-
-- Java 侧结构已经开始接近参考项目。
-- Node 侧运行时与产品化服务层仍是当前最大短板。
+- 参考项目的 Node/ai-bridge 层更厚，运行时辅助脚本和外围服务更多；当前项目仍偏轻。
+- 参考项目的产品化配套更全，包括更多 action、watcher、terminal 相关能力、prompt/skill/MCP 管理细节。
+- 当前项目虽然接入了 Codex，但很多真实用户路径还缺少系统级手工回归证据。
+- 测试数量和覆盖面仍落后于参考项目，尤其是 Java 侧横向能力和复杂交互场景。
 
 ---
 
-## 已对齐或接近对齐的部分
+## 当前已站稳的能力
 
 ### 1. 插件壳与 WebView 主壳
 
-当前项目已经具备完整的 IntelliJ 插件基础入口，包括：
+这一层已经不是问题核心。
 
-- tool window
-- startup activity
-- status bar
-- JCEF 页面初始化
-- React/Vite singlefile 接入
+当前仓库已经具备：
 
-这一层与参考项目已经是同一方向，差距主要在附加窗口、更多 action 和更丰富的运行时管理细节。
+- Tool Window 入口与窗口封装
+- JCEF 页面装载与双向调用
+- WebView React 应用
+- 启动期预热与基础状态挂载
 
-### 2. handler/core 分发模式
+和参考项目相比，这里的差距主要不是“能不能跑”，而是附加功能密度和周边体验。
 
-当前项目已形成：
+### 2. 消息分发与会话编排骨架
+
+这部分已经进入“主干成型”状态，关键入口包括：
 
 - [HandlerContext.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/core/HandlerContext.java)
-- [MessageHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/core/MessageHandler.java)
-- [BaseMessageHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/core/BaseMessageHandler.java)
 - [MessageDispatcher.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/core/MessageDispatcher.java)
+- [SessionSendService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionSendService.java)
+- [SessionLifecycleManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionLifecycleManager.java)
+- [SessionMessageOrchestrator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionMessageOrchestrator.java)
+- [SessionProviderRouter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionProviderRouter.java)
 
-这层已经具备参考项目式的消息分发骨架，后续缺口主要在 handler 覆盖面，而不是分发方式本身。
+这说明当前项目的会话运行时已经是独立子系统，而不是散落在窗口类里的拼接逻辑。
 
 ### 3. Claude 主链
 
-Claude provider 主链已具备：
+Claude 仍然是当前最稳的一条 provider 链路，相关主干包括：
 
 - [BaseSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/common/BaseSDKBridge.java)
 - [ClaudeSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeSDKBridge.java)
 - [claude-sdk-bridge.mjs](/Users/janker/Documents/ProteanCopilot/src/main/resources/bridge/claude-sdk-bridge.mjs)
-- `SessionSendService` / `SessionCallbackAdapter` / `SessionLifecycleManager` 接线
 
-这部分已经脱离 demo 阶段，是当前项目最稳的一条 provider 主链。
+这一层已经不是 demo 代码，而是当前插件运行时的稳定基线。
 
-### 3.1 Codex bridge 首轮运行接入已落地
+### 4. Codex 第一轮接入已经完成
 
-本轮对照代码后，可以明确确认这几件事已经不再是占位：
+相对项目早期描述，Codex 现在的状态需要明确上调：它已经不是“待实现”，而是“已接入、待稳定化”。
 
-- [BaseSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/common/BaseSDKBridge.java) 已具备 provider-specific `query/resume/prewarm` 扩展点。  
-- [CodexSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/codex/CodexSDKBridge.java) 已能透传 `thread`、`sandbox`、`approval`、`workingDirectory`、`modelReasoningEffort` 等 provider 特定参数。  
-- [codex-sdk-bridge.mjs](/Users/janker/Documents/ProteanCopilot/src/main/resources/bridge/codex-sdk-bridge.mjs) 已从 stub 补成真实 bridge，具备 `query`、`resume`、`interrupt`、`prewarm`、`shutdown` 主命令以及流式事件回传能力。  
-- `requestSessionId -> 实际 session/thread id` 的 remap 语义已经进入 bridge 与 session 协调链路，不再只是窗口层临时约定。
-- history replay 成功后，[SessionMessageOrchestrator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionMessageOrchestrator.java) 会显式标记下一条 Codex 消息为 runtime `resume`；[SessionSendService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionSendService.java) 仅在该次恢复成功后清除标记，失败可继续重试。
-- `resume` 现在保留调用方的 `permissionMode`：`plan -> read-only/untrusted`、`acceptEdits -> workspace-write/on-request`，不再固定退回 `default` 组合。
+关键证据：
 
-这意味着 Codex 现在更准确的状态已经不是“结构接入中”，而是“运行接入已完成第一轮，正在补稳定化”。
+- [CodexSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/codex/CodexSDKBridge.java) 已处理 `sandboxMode`、`approvalPolicy`、`workingDirectory`、`reasoningEffort` 等 provider 特定参数。
+- [codex-sdk-bridge.mjs](/Users/janker/Documents/ProteanCopilot/src/main/resources/bridge/codex-sdk-bridge.mjs) 已承担真实 bridge 角色，而不是占位文件。
+- `history` 与 `session` 已经能在 Codex 侧接住 resume / thread 相关语义。
+- `provider/codex` 下已经存在 `CodexHistoryReader`、`CodexHistoryParser`、`CodexHistorySource`、`CodexHistoryIndexService`。
 
-### 3.3 Codex runtime 恢复链路与错误口径已补一轮收口
+所以当前准确表述应该是：`Codex 已经跨过结构接入阶段，正在补运行稳定性与回归证据。`
 
-本轮新增或完成的收口包括：
+补充更新（2026-07-11，本轮 P0 收口）：
 
-- [SessionRuntimeMessages.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionRuntimeMessages.java) 统一 provider unavailable、resume failed、permission denied、sandbox denied、bridge process exit 等用户文案
-- [ChatWindowDelegate.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/ui/ChatWindowDelegate.java) 去掉 Claude-only 可用性判断，改为按 active provider 走通用 SDK 运行判定
-- [SessionLifecycleManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionLifecycleManager.java)、[HistoryMessageInjector.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/history/HistoryMessageInjector.java)、[SessionMessageOrchestrator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionMessageOrchestrator.java) 已统一历史恢复失败口径
-- [BaseSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/common/BaseSDKBridge.java) 已统一 `phase/code/hint/sessionId` 日志与恢复状态回传
-- bridge error、history resume error 均同时写入错误消息与状态提示，并在 history failure 时显式释放 loading，避免用户只看到 toast 却仍处于加载态
-- WebView `errorMatcher` 已能识别统一后的 resume / permission / sandbox 错误
-- [ProteanChatWindow.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/ui/toolwindow/ProteanChatWindow.java) 已补齐 `event:content` 冒号协议消息分发，`get_dependency_status:` 不再被窗口层静默吞掉
-- [useUsageTracking.ts](/Users/janker/Documents/ProteanCopilot/webview/src/hooks/providers/useUsageTracking.ts) 已增加 SDK 状态初始化超时兜底，避免首页在 dependency/status 回调丢失时永久停留在 `Checking SDK status`
+- [SessionSendService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionSendService.java) 现在在 `session.requiresProviderResume()` 时，对 `Codex` 也会显式走 `resumeSession(...)`，不再只对 `Claude` 生效。
+- 历史恢复成功后形成的“下一条消息必须 resume provider thread”语义，现在已经在 Claude / Codex 两条发送链上保持一致。
+- Claude 分支原先一条误写成 `resuming Codex` 的运行日志已修正，避免排查时误导。
+- 新增 [SessionSendServiceResumeTest.java](/Users/janker/Documents/ProteanCopilot/src/test/java/com/protean/copilot/session/SessionSendServiceResumeTest.java) 回归测试，明确覆盖 Claude / Codex 历史恢复后的发送行为。
+- [SessionMessageOrchestratorTest.java](/Users/janker/Documents/ProteanCopilot/src/test/java/com/protean/copilot/session/SessionMessageOrchestratorTest.java) 额外断言：历史恢复失败时不会错误保留 `requiresProviderResume` 状态。
+- 参考 `jetbrains-cc-gui` 补齐了节点进程管理主链：新增 [NodeProcessHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/NodeProcessHandler.java)、[NodeProcessRegistry.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/service/NodeProcessRegistry.java)、[NodeProcessInfo.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/service/NodeProcessInfo.java)，不再只是吞掉 `get_node_processes`，而是能回传真实 bridge/orphan 进程快照并支持 kill / restart / cleanup。
 
-这使当前项目在 “provider 抛错 -> Java 归一 -> WebView 识别 -> 用户可见提示” 这一链路上，已经比上一版快照稳定一层。
+### 5. 历史与权限不是“纯桩”
 
-补充说明：
+旧文档里把 `HistoryHandler`、`PermissionService` 一概归类为“桩”，这个判断已经不准确。
 
-- 这次首页问题的直接根因，不是 dependency manager 本身，而是前端发送的 `get_dependency_status:` 没有被 Java 窗口层继续分发到 handler
-- 修复后，首页 SDK 状态链路已经从“可能无限等待”提升为“正常回调可落地，异常场景也有前端超时兜底”
+当前代码显示：
 
-### 3.2 Codex dependency backend 已开始补齐
+- [HistoryHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/HistoryHandler.java) 已经把加载、删除、导出、标题、收藏、深搜、CLI 会话转换等动作拆到了独立 service。
+- [PermissionService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionService.java) 已经具备 session registry、decision store、dialog router、file protocol、request watcher 等组件。
+- [PermissionHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/PermissionHandler.java) 已经实现权限弹窗、AskUserQuestion、PlanApproval 的前后端桥接与超时兜底。
 
-相对上一版快照，当前工作树已经新增：
+更准确的结论是：
 
-- [SdkDefinition.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/dependency/SdkDefinition.java)
-- [DependencyManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/dependency/DependencyManager.java)
-- [InstallResult.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/dependency/InstallResult.java)
-- [UpdateInfo.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/dependency/UpdateInfo.java)
-- [DependencyHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/DependencyHandler.java)
+- 历史与权限两条线都已落地第一轮实现。
+- 当前问题在于还有多少边界场景、异常流和真实交互回归没有收口，而不是“有没有后端实现”。
 
-已经落地的方向包括：
+### 6. 设置与依赖管理已经迈过最初阶段
 
-- Claude / Codex SDK 的统一 definition
-- 基于 Node/npm 的本地安装目录管理
-- settings WebView 的 dependency IPC 回调接线
-- 版本查询、安装、卸载、更新检查、Node 环境检测入口
+- [SettingsService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/settings/SettingsService.java) 已经基于 `PropertiesComponent` 做基础持久化，不再是简单硬编码返回。
+- [DependencyManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/dependency/DependencyManager.java) 已经具备 Node 环境检测、SDK 安装、卸载、版本检查、状态汇总等能力。
+- [DependencyHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/DependencyHandler.java) 说明依赖管理已经进入 Java ↔ WebView 闭环。
 
-本轮已完成的收口：
+这里的现实状态应当理解为：
 
-- `SdkDefinition.java`、`webview/package.json`、`webview/package-lock.json` 已统一锁定 `@openai/codex-sdk@0.143.0`
-- 实际验证了此前写死的 `0.33.0` 不存在，已替换为可安装版本并补了 fallback 列表
-- [codex-runtime.md](/Users/janker/Documents/ProteanCopilot/doc/codex-runtime.md) 已补充运行环境、锁版约束、常见失败与排查说明
-- `DependencyHandler` 已同时兼容 `window.nodeEnvironmentStatus` 与 `window.updateNodeEnvironment`，消除前后端回调名不一致导致的 UI 假失效
-- dependency backend 已纳入本轮 Java/WebView 定向回归
-
-### 4. history 双层模型
-
-[HistoryIndexService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/history/HistoryIndexService.java) 现在已经是：
-
-- 运行期 `SessionIndexCache`
-- provider 历史读取 `ProviderHistorySource`
-- Claude / Codex 双 provider merge
-- 收藏 / 自定义标题 / entrypoint 合并输出
-
-并且已经接入：
-
-- [ClaudeHistorySource.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/claude/ClaudeHistorySource.java)
-- [CodexHistorySource.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/codex/CodexHistorySource.java)
-
-这说明历史列表主入口已经具备通用化方向，不再只是 Claude-only 的内存列表。
-
-### 5. session 通用层第一轮拆分
-
-当前 session 层已形成：
-
-- [SessionProviderRouter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionProviderRouter.java)
-- [SessionProviderAdapter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionProviderAdapter.java)
-- [SessionMessageOrchestrator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionMessageOrchestrator.java)
-- [MessageMerger.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/MessageMerger.java)
-- [ReplayDeduplicator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/ReplayDeduplicator.java)
-- [ClaudeSessionProviderAdapter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/ClaudeSessionProviderAdapter.java)
-- [CodexSessionProviderAdapter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/CodexSessionProviderAdapter.java)
-
-这一层和参考项目相比，已经不再缺“router / orchestrator / replay merge”这些基础件，当前问题变成：
-
-- 窗口层还没有完全退后
-- provider-specific message handler 还没有再细拆
-
-### 6. permission 第一轮闭环
-
-当前权限系统已形成这一组核心类：
-
-- [PermissionService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionService.java)
-- [PermissionManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionManager.java)
-- [PermissionDecisionStore.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionDecisionStore.java)
-- [PermissionToolCatalog.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionToolCatalog.java)
-- [PermissionRequestWatcher.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionRequestWatcher.java)
-- [PermissionDialogRouter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/PermissionDialogRouter.java)
-- [ToolInterceptor.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/ToolInterceptor.java)
-- [DiffReviewService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/permission/DiffReviewService.java)
-
-相比更早的文档快照，当前项目已经不能再描述成“permission 只有占位”。
+- 基础依赖管理闭环已经有了。
+- 但距离参考项目那种更完整的升级策略、权限辅助、异常提示细节，仍有差距。
 
 ---
 
-## 与参考项目相比的关键差异
+## 仍然存在的关键缺口
 
-### 1. Codex 已跨过结构接入，进入首轮运行接入
+### 1. Node/bridge 运行时厚度不足
 
-当前项目已具备：
+和 `jetbrains-cc-gui` 相比，当前项目最明显的差距仍在 Node 侧运行时生态。
 
-- [CodexSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/codex/CodexSDKBridge.java)
-- [codex-sdk-bridge.mjs](/Users/janker/Documents/ProteanCopilot/src/main/resources/bridge/codex-sdk-bridge.mjs)
-- [CodexHistoryReader.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/codex/CodexHistoryReader.java)
-- [CodexHistoryParser.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/codex/CodexHistoryParser.java)
-- [CodexHistoryIndexService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/codex/CodexHistoryIndexService.java)
-- [CodexSessionProviderAdapter.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/CodexSessionProviderAdapter.java)
+参考项目有更丰富的 `ai-bridge` 文件和外围运行时辅助模块；当前仓库主要还是依赖嵌入式 bridge resource。这会带来两个现实影响：
 
-但目前更准确的现实状态是：
+- 运行时问题定位成本更高。
+- Provider 扩展、调试、兼容处理的空间还不够大。
 
-- Node 侧 [codex-sdk-bridge.mjs](/Users/janker/Documents/ProteanCopilot/src/main/resources/bridge/codex-sdk-bridge.mjs) 已经不是 stub，而是能真实 import `@openai/codex-sdk` 并处理 query/resume/interrupt/prewarm/shutdown。  
-- Java 侧 `CodexSDKBridge` 也已不再是最薄桥接，已经承载了 provider-specific 参数透传与权限模式映射。  
-- 当前仓库仍未形成参考项目那种 `channel-manager + services/codex/* + permission-mapper` 的更厚 Node 运行时层。
+### 2. 产品化横向能力不足
 
-对比参考项目：
+参考项目已经有更完整的：
 
-- 参考项目已经有 `ai-bridge/channels/codex-channel.js`
-- 已有 `ai-bridge/services/codex/*`
-- 已有 Codex 事件归一化、权限映射、thread run streamed 的完整处理
+- action 矩阵
+- terminal 相关能力
+- watcher / monitor 服务
+- prompt / skill / MCP 管理周边
+- 更丰富的 provider 管理与 usage 视图
 
-结论：
+当前项目虽然主链在补齐，但横向功能仍偏薄，导致“能跑”和“好用”之间还有距离。
 
-- 当前项目不是“没有 Codex”
-- 而是“Codex 的 Java/UI/history/runtime 主链已接通第一轮，但运行时分层和稳定性仍未补完”
+### 3. 真实 IDE 场景下的系统回归证据仍不够
 
-### 2. Node ai-bridge 架构差距仍然很大
+现在最需要补的不是再加一层抽象，而是把现有链路在真实场景里压实，尤其是：
 
-当前项目的 Node 侧虽然已经从双 stub 时代前进了一步，但主体仍然主要是：
+- query / resume / interrupt
+- approval / deny / timeout
+- sandbox 失败与恢复
+- 历史恢复与 provider 切换
+- dependency 缺失、安装失败、版本不匹配
 
-- `claude-sdk-bridge.mjs`
-- `codex-sdk-bridge.mjs`
+当前自动化测试已经提供了不错的基础，但还不能替代真实 provider、真实凭据、真实 IDE 状态下的手工联调。
 
-参考项目的 Node 侧则已经形成：
+### 4. Java 与前端测试面仍有提升空间
 
-- `channel-manager.js`
-- `channels/*`
-- `services/claude/*`
-- `services/codex/*`
-- `utils/permission-mapper.js`
-- `permission-ipc.js`
-- 其他系统级 bridge/service/util
+当前项目已有 24 个 Java 测试文件、84 个 WebView 测试文件，说明测试并非空白。
 
-这带来的直接差异是：
+但和参考项目相比，差距仍然存在于：
 
-- 当前项目 provider 扩展点主要在 Java 侧
-- 参考项目 provider 扩展点同时在 Java 与 Node 侧都已稳定
-- 当前项目已修正 Java -> JCEF 的流式 JSON 单次转义契约，但该类边界约束尚未沉淀为参考项目那样的独立 Node channel/service 传输层
-
-也因此，当前项目的多 Provider 虽然已经起步，但可扩展性还未达到参考项目成熟度。
-
-### 3. BaseSDKBridge 通用能力已完成第一轮补强，但仍不够承载完整多 Provider
-
-[BaseSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/common/BaseSDKBridge.java) 目前已经承担了共用进程桥接职责，并在本轮补上了关键扩展点，但相对参考项目和后续扩展需要，仍偏薄：
-
-- provider-specific 的 query/resume/prewarm 构造虽然已存在，但失败恢复、生命周期约束、事件约束仍偏轻量
-- session id / thread id 重映射语义已经补了一轮，但还需要更多真实场景回归验证边界
-- 更完整的 thread/session 恢复语义仍值得继续沉淀成通用钩子
-
-这意味着：
-
-- Claude 主链足够用
-- 但 Codex 这种 thread 模型 provider 接进来时，会继续倒逼 Base bridge 扩展
-
-### 4. history 现在是双 provider，但深度仍不对称
-
-当前项目已经有 Claude + Codex 两条 history source。
-
-但和参考项目相比仍有几个差异：
-
-- Claude 侧更完整，Codex 侧仍偏轻
-- 当前项目没有参考项目那种更完整的 `CodexHistorySessionService` / `CodexSessionLiteReader` 组合
-- usage 聚合和搜索深度在 Codex 侧仍偏薄
-- 历史回放后的 provider-specific message 处理还没有完全沉到独立 handler
-
-结论：
-
-- history 的“provider 化”已经完成第一阶段
-- history 的“provider 深度对齐”还没有完成
-
-### 5. session 通用层已抽出，但窗口层粘连仍在
-
-当前项目已经把一部分 provider 细节从窗口层抽到了 router / orchestrator / adapter。
-
-但和参考项目相比仍存在：
-
-- `ProteanChatWindow.java` 仍然知道太多会话细节
-- `SessionLifecycleManager.java` 还承担了偏多窗口协作职责
-- 历史 session 恢复虽然已经走 orchestrator，但窗口层仍未完全退到 UI 壳
-- 当前没有参考项目那类更完整的 `CodexMessageHandler` / provider-specific message handler 体系
-
-这部分的真实状态应描述为：
-
-- 主链已经开始解耦
-- 但尚未真正做到“窗口不关心 provider”
-
-### 6. permission 在 Java 侧起得更快，但仍未与多 Provider runtime 完整闭合
-
-当前项目已完成：
-
-- 写文件入口盘点
-- 命令执行入口盘点
-- diff apply 入口回收
-- dialog 生命周期测试补齐
-- 决策记忆策略补齐
-
-但与参考项目相比，仍存在：
-
-- provider runtime 层的权限映射尚未完全统一
-- Codex runtime 已接通第一轮，但 permission 对 Codex 的真实执行闭环仍主要停留在 Java 配置层与 bridge 参数映射层
-- permission 与 provider 事件模型的协同深度不如参考项目
-
-因此：
-
-- permission 不能再算占位
-- 但也还不能算“多 Provider 级别的完整执行安全边界”
-
-### 7. 测试面差距仍明显
-
-当前项目已经新增并保留了这些关键测试方向：
-
-- session router / dedupe / merge
-- history load
-- permission decision store
-- permission handler
-- Claude / Codex history reader
-- Base bridge remap / Codex sandbox-approval 映射
-
-但总体测试规模与参考项目仍差距很大：
-
-- 当前 Java 测试 17 个
-- 参考项目 Java 测试 86 个
-
-最明显的缺口仍在：
-
-- Codex runtime bridge
-- dependency install / update / node environment
-- provider-specific message 处理。参考项目已拆出 `ClaudeMessageHandler` / `CodexMessageHandler`，当前仍主要由通用 orchestrator 承担。
-- session lifecycle 与窗口解耦回归
-- permission 与 provider 执行链联合回归
+- 更多横向服务类测试
+- 更复杂交互链路测试
+- Provider 异常场景回归
+- 历史、权限、diff、settings 的跨层验证
 
 ---
 
 ## 当前阶段判断
 
-如果把项目拆成四层：
+如果把开发阶段拆成四层：
 
-1. 插件壳
-2. 单 Provider 主链
-3. 多 Provider 通用层
-4. 产品化 runtime / 权限 / 历史 / 技能闭环
+1. 插件原型
+2. 单 Provider 可运行
+3. 多 Provider 第一轮可运行
+4. 产品化稳定与体验打磨
 
-当前项目更准确的位置是：
+那么 `ProteanCopilot` 现在大致处在：
 
-- 第 1 层：已完成
-- 第 2 层：Claude 已完成，Codex 已完成首轮运行接入并补完 dependency backend 锁版
-- 第 3 层：已明显起步，正在做系统级手工回归与扩面测试
-- 第 4 层：仍在早期阶段
+`第 3 层后半段，正在向第 4 层过渡。`
 
-和前一版进度文档相比，最大的修正有三点：
+也就是说：
 
-1. 不能再说“多 Provider 还没开始”，因为 `provider/codex + history + session adapter` 已经落地。
-2. 也不能继续说“Codex runtime bridge 仍是 stub”，因为 bridge、provider-specific 参数透传、session/thread remap 已经落地。
-3. 现在更准确的判断应是：`Codex 首轮运行接入已完成，但系统级稳定化和端到端回归仍未完成`。
+- 已经不需要再证明“这个架构方向能不能成立”。
+- 现在更需要证明“这些子系统在真实 IDE 里能不能稳定协同”。
 
 ---
 
-## 下一阶段优先级
+## 建议中的下一阶段优先级
 
-### 第一优先级：把 Codex 首轮运行接入从“定向通过”推进到“系统级稳定回归”
+### P0：运行稳定性与回归收口
 
-需要优先完成：
+优先完成这些系统级验证与修补：
 
-1. 在 IDE 内做一次完整的 WebView / provider / permission / session 手工恢复回归，覆盖 query、resume、interrupt、approval、sandbox、超时与失败场景。  
-2. 继续补 Codex 运行链路上的测试面，把现在的 bridge / callback / dependency 定向覆盖扩到更完整的 provider runtime 恢复链路。  
-3. 继续统一运行期日志、错误提示、异常恢复口径，尤其是 provider 抛错、permission 拒绝、resume 失败三类用户可感知场景。  
-4. 补真实 Codex thread 恢复与 sandbox/approval 参数组合的端到端验证记录，避免后续接更多 provider 时重复返工。
+- Claude / Codex 的 query、resume、interrupt 手工联调
+- permission / ask user / plan approval 的端到端回归
+- sandbox / approval / dependency 异常提示统一
+- 历史恢复后的会话状态一致性检查
 
-本轮相对该优先级的新增完成项：
+理由：当前最大的风险不在“少一个功能入口”，而在“已有链路是否可靠”。
 
-- 首页 `Checking SDK status` 卡死问题已修复，补齐了窗口层 `event:content` 分发缺口
-- 增补了 App 级 SDK 状态加载回归测试与超时兜底测试
-- `get_dependency_status` 这条 provider/dependency 启动链路已从“结构存在”推进到“有回归保护”
-- `@openai/codex-sdk` 的实际安装、精确版本锁定、`package-lock.json` 同步与环境说明已完成；剩余的是 IDE 内用户操作和真实凭据的手工验证，不是依赖后端实现缺失。
-- 模型流式消息的 JSON 双重转义已修复并加入 Java 回归测试，消除了 WebView 在模型返回时 `JSON.parse` 失败的一条确定性传输缺陷。
+本轮已完成的 P0 子项：
 
-原因：
+- `Codex` 历史恢复后的下一条发送已从“误走 query 风险”收口为“显式走 resumeSession”。
+- `Node Process Management` 已从“无 handler / 空快照兜底”收口为参考项目同结构实现，`get_node_processes`、`kill_node_process`、`kill_all_orphans`、`restart_node_daemon` 现在都有专用后端支撑。
+- `sandbox / approval / dependency` 三类异常提示已进一步统一：session/runtime 与 dependency 安装、卸载、状态查询现在共用同一套稳定消息归类逻辑，前端优先消费规范化 `message` 而不是裸 `Exception.getMessage()`。
+- 参考 `jetbrains-cc-gui` 继续补齐了 Codex 路径细节：发送前增加 `runtime access` 明确拦截，permission deny 后会话会主动 interrupt 清理，history restore / thread remap 现在也有更清晰的 `epoch + sessionId` 诊断日志。
+- 历史恢复失败时不会残留错误的 provider resume 标记。
+- 会话进行中若 provider `updateMessages` 快照暂时落后于刚发送的提问，`SessionMessageOrchestrator` 现在会保留本地尾部 pending user message，避免最新提问在同一 session 中被覆盖丢失。
+- 上述行为已有 Java 定向回归保护，而不是只靠人工记忆。
+- `PermissionHandler` 现在已有更完整的回包清理回归：Ask User Question 与 Plan Approval 在收到前端响应后会正确完成并移除 pending future。
+- `Codex runtime access = inactive` 时，不再等 bridge/runtime 更下游模糊失败，而是在发送前直接返回稳定错误文案。
+- permission deny 现在不只是前端收到一个 rejected 信号，Java 侧也会同步 interrupt 当前 session、补发 `onStreamEnd`、清理 loading，并触发对应回归测试。
+- `updateSessionId` 处理 Codex thread remap 时，现在会旋转 `runtimeSessionEpoch` 并写入结构化日志，后续排查 runtime thread 漂移更容易。
+- `DependencyHandler` 现在已有稳定错误口径回归：依赖状态查询失败时会为所有 SDK 推送统一的 `status=error` payload；`node_not_configured` 的安装失败结果也已有测试保护。
+- `check_node_environment` 的双回调行为（`window.nodeEnvironmentStatus` 与 `window.updateNodeEnvironment`）已补回归，避免前后端状态各自漂移。
+- `DependencySection` 前端现在也补上了 `node_not_configured` 后端 install result 的 warning toast 回归，避免只在 Java 层有稳定 payload、WebView 却没有稳定提示。
+- 新增 `SessionMessageOrchestrator` 回归测试，分别覆盖“快照落后时保留最新 user message”和“provider 快照追平后不重复追加 user message”两条关键路径。
 
-- 现在 Java、history、UI 与 bridge 主链都已经接上了，短板已经不是“缺入口”，而是“缺稳定性证明”。  
-- dependency backend 这一轮已经收口到可安装、可锁版、可说明、可回归；接下来的短板是系统级恢复场景是否真的站稳。  
-- 如果不先把真实运行、恢复、权限场景做扎实，后面的 provider 扩展只会继续放大现有边界风险。
+本轮仍未完成、仍需继续推进的 P0 子项：
 
-### 第二优先级：继续减薄窗口层与 session 层粘连
+- 真实 IDE 内的 `query / resume / interrupt` 手工联调
+- `permission / ask user / plan approval` 的完整端到端联调
 
-需要继续推进：
+### P1：设置与管理能力对齐参考项目
 
-- history session 恢复完全依赖 `SessionMessageOrchestrator`
-- `ProteanChatWindow` 继续只保留 UI 协调职责
-- `SessionLifecycleManager` 继续缩到生命周期编排，不再承接 provider 细节
-- 补 provider-specific message handler 扩展点
+这一层过去最大的短板，不是前端没有入口，而是很多入口仍停留在“能展示、但后端直接报 unavailable”。
 
-原因：
+本轮已完成的对齐项：
 
-- 当前这一层已经有骨架
-- 再不继续减薄，Codex runtime 一接通，窗口层会重新变厚
+- [FrontendActionCoverageHandler.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/FrontendActionCoverageHandler.java) 已补齐一批真实设置动作，不再把对应消息统一打回 `This action is not available in the current runtime.`。
+- Prompt 管理从只读变成可写：
+  - `add_prompt`
+  - `update_prompt`
+  - `delete_prompt`
+  现在都会落到 [CodemossSettingsService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/settings/CodemossSettingsService.java) 的真实持久化，并回推 `window.promptOperationResult` + 最新 prompt 列表。
+- MCP 管理从临时内存态对齐到设置持久化：
+  - `add/update/delete/toggle_{codex_}mcp_server`
+  - `get_{codex_}mcp_servers`
+  - `get_{codex_}mcp_server_status`
+  现在都走 `CodemossSettingsService` 的 MCP 配置读写；[McpServerManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/settings/manager/McpServerManager.java) 也新增了从设置重建运行时 server list 的能力，不再只是一份纯内存 list。
+- Skill 管理补齐了第一轮 IDE / 文件系统联动：
+  - `open_skill` 可以直接在 IDE 里打开 skill 文件
+  - `delete_skill` 会删除对应 skill 文件/目录并回推 `window.skillDeleteResult`
+  - `toggle_skill` 会在启用目录与 `.codemoss/skills-disabled` 间移动文件，实现基础启停切换并回推 `window.skillToggleResult`
+- `get_mcp_server_tools` / `get_codex_mcp_server_tools` 仍未接入真实 SDK tool 枚举，但已经补了稳定结构化返回，不再让前端拿不到 payload。
 
-### 第三优先级：补 Codex 侧 history / usage 深度
+本轮新增的定向回归：
 
-在 runtime 打通后，再继续补：
+- [FrontendActionCoverageHandlerTest.java](/Users/janker/Documents/ProteanCopilot/src/test/java/com/protean/copilot/handler/FrontendActionCoverageHandlerTest.java)
+  - 新增 prompt add 行为会持久化并回推最新列表的断言
+  - 新增 MCP add 行为会持久化并回推最新列表的断言
 
-- Codex history session service
-- 更完整的 lite reader / replay 支撑
-- usage 聚合
-- 更细的历史回放测试
+这意味着当前项目在“settings / prompt / MCP / skill 管理”上，已经从“有 UI 但多数是假动作”推进到“至少核心 CRUD 和联动动作已经可用”的阶段。
+- `sandbox / dependency` 在真实 provider 运行时下的异常提示与恢复验证
 
-原因：
+本轮相关验证：
 
-- 当前 Codex history 已经能读，但仍偏轻
-- 应避免在 runtime 未通时先做大量深历史重构
+- `./gradlew test --tests com.protean.copilot.session.SessionSendServiceResumeTest --tests com.protean.copilot.session.SessionSendServiceTest --tests com.protean.copilot.session.SessionMessageOrchestratorTest --tests com.protean.copilot.session.SessionRuntimeMessagesTest` 已通过
+- `./gradlew test --tests com.protean.copilot.session.SessionRuntimeMessagesTest --tests com.protean.copilot.handler.DependencyHandlerTest -PskipWebview=true` 已通过
+- `./gradlew test --tests com.protean.copilot.session.SessionSendServiceTest --tests com.protean.copilot.session.SessionSendServiceResumeTest --tests com.protean.copilot.session.SessionMessageOrchestratorTest --tests com.protean.copilot.handler.PermissionHandlerTest -PskipWebview=true` 已通过
+- `./gradlew test --tests com.protean.copilot.handler.PermissionHandlerTest --tests com.protean.copilot.handler.DependencyHandlerTest --tests com.protean.copilot.session.SessionSendServiceResumeTest --tests com.protean.copilot.session.SessionMessageOrchestratorTest --tests com.protean.copilot.session.SessionRuntimeMessagesTest` 已通过
+- `./gradlew test --tests com.protean.copilot.session.SessionMessageOrchestratorTest -PskipWebview=true` 已通过
+- `cd webview && npx vitest run src/components/settings/DependencySection/index.test.tsx src/utils/errorMatcher.test.ts src/hooks/useWindowCallbacks.test.ts` 已通过
 
-### 第四优先级：把 Node runtime 从单 bridge 资源演进为可维护分层
+### P1：Codex 深化而非继续浅铺功能
 
-参考项目的 `ai-bridge` 已拆分 channel、Claude/Codex service、SDK loader、permission mapper 等模块；当前项目只有 `claude-sdk-bridge.mjs` 与 `codex-sdk-bridge.mjs` 两个 bridge resource。
+下一步比起继续横向铺更多 feature，更值得投入的是：
 
-需要在不改变现有 Java adapter/router/orchestrator 边界的前提下，逐步抽出：
+- Codex provider 的失败恢复
+- 历史 / session / permission 在 Codex 路径上的细节补齐
+- 运行日志、状态文案、调试可见性增强
 
-- provider event normalizer
-- provider-specific permission mapper
-- SDK loading / environment helper
-- bridge process 与错误恢复公共层
+理由：Codex 已经接进来，现在最有价值的是把它站稳。
 
-原因：
+### P2：补横向产品化能力
 
-- 目前 bridge 已能运行，但继续把 provider 差异堆在单文件会放大 Codex 扩展和故障定位成本。
-- 这个工作应排在运行稳定化之后、产品功能扩展之前，避免为了加功能再次重构运行时。
+在主链稳定后，再推进这些更像“成熟插件”的部分：
 
-### 第五优先级：再扩 skill / MCP / prompt 后端闭环
+- 更多 action 和编辑器/终端联动
+- 更完整的 skill / prompt / MCP 管理能力
+- detached window、watcher、辅助服务
+- 更丰富的 settings / usage / provider 体验
 
-这部分仍应放在后面，原因很直接：
+### P2.6：skill / prompt / agent 管理闭环继续补齐（本轮新增）
 
-- 当前项目的真实短板仍在 provider runtime 与通用层站稳
-- 过早扩 skill / MCP 只会把薄弱的底座继续放大
+参考 `jetbrains-cc-gui` 的 `PromptHandler / AgentHandler / SkillHandler` 之后，本轮优先补的是当前仓库里“前端已经做了 UI，但 Java 侧仍然 unavailable”的管理动作闭环。
+
+本轮已完成：
+
+- [`FrontendActionCoverageHandler.java`](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/FrontendActionCoverageHandler.java) 不再只承担 prompt CRUD / skill toggle 这类最基础动作，而是继续补齐了：
+  - `export_prompts`
+  - `import_prompts_file`
+  - `save_imported_prompts`
+  - `export_agents`
+  - `import_agents_file`
+  - `save_imported_agents`
+  - `import_skill`
+- prompt / agent 导入现在已经具备参考项目同类能力的主链：
+  - 选择 JSON 文件
+  - 校验导出格式
+  - 生成 import preview
+  - 根据 `skip / overwrite / duplicate` 策略落盘
+  - 回推 `window.*ImportPreviewResult` / `window.*ImportResult`
+  - 刷新最新列表给前端
+- skill 导入不再直接打回 `This action is not available in the current runtime.`，而是支持：
+  - Claude 路径导入文件或目录型 skill
+  - Codex 路径导入带 `SKILL.md` 的目录型 skill
+  - 导入后回推 `window.skillImportResult` 并刷新 skill 列表
+- prompt / agent 导出也不再是假动作，当前会将选中项导出为与前端导入链兼容的 JSON 结构，默认写入项目下 `doc/exports/`。
+
+这意味着当前仓库在这几组设置能力上，已经从“有 UI、有回调名、但后端大面积 unavailable”推进到“导入预览、冲突处理、保存结果、刷新列表都可用”的阶段。
+
+本轮回归测试：
+
+- [`FrontendActionCoverageHandlerTest.java`](/Users/janker/Documents/ProteanCopilot/src/test/java/com/protean/copilot/handler/FrontendActionCoverageHandlerTest.java)
+  - 新增 prompt 导入 duplicate 策略断言
+  - 新增 agent 导入 overwrite 策略断言
+  - 继续覆盖 supplemental webview actions 都会被后端消费
+- 验证命令：
+  - `./gradlew test --tests com.protean.copilot.handler.FrontendActionCoverageHandlerTest`
+
+当前边界：
+
+- 本轮为了先把能力补成可用闭环，仍然把这些逻辑收在 `FrontendActionCoverageHandler` 内部辅助方法里；结构上还没有像参考项目那样完全拆成 `PromptHandler / AgentHandler / SkillHandler / ImportExportSupport`。
+- 导出目前默认写到 `doc/exports/`，还没有完全对齐参考项目那种更完整的另存为对话框和 import/export support 抽象。
+- watcher / detached helper / editor-terminal 更深联动还未在这一轮继续展开，这部分仍属于后续纵深工作。
+
+### P2.5：ai-bridge 及周边基础设施补齐（本轮新增）
+
+参考 `jetbrains-cc-gui` 对照后，当前仓库在 ai-bridge 方向上的主要差距，之前并不只是“少几个脚本”，而是缺少围绕 bridge 运行的基础设施层。
+
+本轮已补齐的第一批结构：
+
+- 新增 [BridgePathLocator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/bridge/BridgePathLocator.java)
+  - 统一 bridge runtime 根目录定位
+  - 支持 `protean.bridge.dir` / `PROTEAN_BRIDGE_DIR` 覆盖
+- 新增 [BridgeArchiveExtractor.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/bridge/BridgeArchiveExtractor.java)
+  - 负责把 classpath bridge 资源物化到 runtime 目录
+  - 先对齐“extractor”职责，而不是继续把资源提取逻辑塞在 `BaseSDKBridge` 里
+- 新增 [BridgeDirectoryResolver.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/bridge/BridgeDirectoryResolver.java)
+  - 为 provider 解析带作用域的 bridge script 运行目录
+  - 让 Claude / Codex bridge 运行目录结构对齐参考项目的 resolver 思路
+- 新增 [EnvironmentConfigurator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/bridge/EnvironmentConfigurator.java)
+  - 统一补齐 `PATH`、`HOME`、`CODEX_HOME`、`CLAUDE_PERMISSION_DIR`、`CLAUDE_PERMISSION_SAFETY_NET_MS`
+  - 让 bridge 启动和 dependency 安装使用同一套环境补齐逻辑
+- 新增 [ProcessManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/bridge/ProcessManager.java)
+  - 统一 bridge 相关子进程注册、查找、终止、清理
+
+本轮同步接入现有主链：
+
+- [BaseSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/common/BaseSDKBridge.java)
+  - 脚本提取改为走 `BridgeDirectoryResolver`
+  - 进程环境改为走 `EnvironmentConfigurator`
+  - bridge 进程注册/终止/清理改为走 `ProcessManager`
+  - 同时把这些 helper 改成懒加载，避免纯单元测试或桥接未启动路径提前触发 IntelliJ service 依赖
+- [DependencyManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/dependency/DependencyManager.java)
+  - npm 安装流程也接入 `EnvironmentConfigurator`，不再自己裸跑 `ProcessBuilder`
+
+本轮新增的 ai-bridge 基础设施回归：
+
+- [BridgeDirectoryResolverTest.java](/Users/janker/Documents/ProteanCopilot/src/test/java/com/protean/copilot/bridge/BridgeDirectoryResolverTest.java)
+  - 验证 bridge script 会被物化到 provider scoped runtime 目录
+- [EnvironmentConfiguratorTest.java](/Users/janker/Documents/ProteanCopilot/src/test/java/com/protean/copilot/bridge/EnvironmentConfiguratorTest.java)
+  - 验证 `PATH/HOME/CODEX_HOME/CLAUDE_PERMISSION_DIR` 等关键环境变量会被稳定补齐
+- [BaseSDKBridgeTest.java](/Users/janker/Documents/ProteanCopilot/src/test/java/com/protean/copilot/provider/common/BaseSDKBridgeTest.java)
+  - 继续作为回归保护，确保这轮 bridge helper 抽离没有打断既有 session/runtime 语义
+
+本轮验证：
+
+- `./gradlew test --tests com.protean.copilot.bridge.BridgeDirectoryResolverTest --tests com.protean.copilot.bridge.EnvironmentConfiguratorTest --tests com.protean.copilot.provider.common.BaseSDKBridgeTest`
+
+边界说明：
+
+- 当前仓库仍未像参考项目那样引入完整打包式 `ai-bridge.zip`、`channel-manager.js`、签名校验和更厚的 provider-side helper 集群。
+- 本轮完成的是“ai-bridge 周边基础设施层”的第一步：先把 bridge 运行目录、环境配置、资源物化、进程托管这些共性职责从 provider/bridge 主类里抽出来并接入现有链路。
+- 后续如果继续对齐参考项目，这一层的下一批目标会是：
+  - 更完整的 bridge 分发物与版本管理
+  - Claude/Codex 更细的 process/channel manager
+  - watcher / preloader / detached helper service
+
+### P3：继续扩测试面
+
+建议把新增测试重点放在：
+
+- provider 运行时异常
+- history 恢复链路
+- permission 超时与兜底
+- dependency 安装与状态同步
+- WebView 与 Java 的协议契约
 
 ---
 
-## 当前结论
+## 最后的判断
 
-`ProteanCopilot` 现在最准确的描述是：
+参考 `jetbrains-cc-gui` 来看，`ProteanCopilot` 当前最值得肯定的不是“抄到了多少模块名”，而是已经把多 Provider Agent 插件最难的几条主干都搭出来了。
 
-- 已经有参考项目式的主干分层
-- Claude 主链已站稳
-- history / permission / session 的通用层已基本成形
-- Codex 已经从“结构层”推进到“首轮运行层”，但还没完成稳定化收口
-- dependency/backend 已完成真实安装、锁版、lockfile、环境说明和 Settings 数据链路的首轮闭环，但还没完成 IDE 内人工安装/卸载与真实凭据回归
-- 流式消息 JSON 传输已从双重转义的确定性失败修正为单次边界转义，并已有自动化保护；真实 IDE 流式响应仍待手工回归记录
+当前真正的开发重点应该从“继续证明架构”切到“压实运行稳定性，再补产品化细节”。
 
-因此当前与参考项目的核心差异，不再是“有没有这些目录”，而是：
+一句话收尾：
 
-1. Node runtime 体系差距仍大。
-2. Codex provider 已有真实 bridge，但事件归一化、分层厚度与稳定性验证仍不足。
-3. 依赖后端已完成锁版和定向回归，但真实 IDE 操作、真实 thread 与恢复场景仍缺验证记录。
-4. session / permission 虽已拆层，但还未完全产品化。
-5. 测试覆盖密度仍明显不足，特别是 provider runtime、事件归一化和生命周期恢复。
-
-后续策略应继续坚持：
-
-- 少加新壳
-- 优先补运行时稳定闭环
-- 先把 `Codex runtime 稳定化 + session 通用层 + permission 协同` 做实
-- 再去追更宽的产品面
+`现在的 ProteanCopilot，已经不是缺骨架，而是到了该把骨架长成肌肉的时候。`

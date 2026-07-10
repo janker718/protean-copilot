@@ -50,6 +50,10 @@ public class SessionMessageOrchestrator {
         if (session.getSessionId() == null || session.getSessionId().isBlank()) {
             return CompletableFuture.completedFuture(null);
         }
+        LOG.info("[HistoryLoad] provider=" + session.getProvider()
+            + ", sessionId=" + session.getSessionId()
+            + ", cwd=" + session.getCwd()
+            + ", epoch=" + session.getRuntimeSessionEpoch());
         session.setLoading(true);
         session.setError(null);
         return CompletableFuture.supplyAsync(() -> historyAccess.getProviderSessionMessages(
@@ -62,12 +66,22 @@ public class SessionMessageOrchestrator {
             ensureSummary(parsedMessages);
             pushMessagesToFrontend(parsedMessages);
             session.markProviderResumeRequired();
+            LOG.info("[HistoryLoad] provider messages loaded: count=" + parsedMessages.size()
+                + ", provider=" + session.getProvider()
+                + ", resumeRequired=" + session.requiresProviderResume()
+                + ", epoch=" + session.getRuntimeSessionEpoch());
         }).whenComplete((v, ex) -> {
             session.setLoading(false);
             session.setError(ex == null ? null : SessionRuntimeMessages.historyResumeFailed(
                 session.getProvider(),
                 rootMessage(ex)
             ));
+            if (ex != null) {
+                LOG.warn("[HistoryLoad] failed for provider=" + session.getProvider()
+                    + ", sessionId=" + session.getSessionId()
+                    + ", epoch=" + session.getRuntimeSessionEpoch()
+                    + ": " + rootMessage(ex), ex);
+            }
         });
     }
 
@@ -125,9 +139,57 @@ public class SessionMessageOrchestrator {
         List<ChatSession.Message> previousMessages = session.getMessages();
         List<ChatSession.Message> nextMessages = parseMessages(parsedElement.getAsJsonArray());
         prepareReplayDedupe(previousMessages, nextMessages);
+        nextMessages = preservePendingUserMessage(previousMessages, nextMessages);
         session.replaceMessages(nextMessages);
         ensureSummary(nextMessages);
         pushMessagesToFrontend(nextMessages);
+    }
+
+    private List<ChatSession.Message> preservePendingUserMessage(
+        List<ChatSession.Message> previousMessages,
+        List<ChatSession.Message> nextMessages
+    ) {
+        if (previousMessages == null || previousMessages.isEmpty()) {
+            return nextMessages;
+        }
+
+        ChatSession.Message lastPreviousMessage = previousMessages.get(previousMessages.size() - 1);
+        if (lastPreviousMessage == null
+            || lastPreviousMessage.type != ChatSession.Message.Type.USER
+            || lastPreviousMessage.content == null
+            || lastPreviousMessage.content.isBlank()) {
+            return nextMessages;
+        }
+
+        if (hasMatchingTrailingUser(nextMessages, lastPreviousMessage)) {
+            return nextMessages;
+        }
+
+        long latestNextTimestamp = Long.MIN_VALUE;
+        for (ChatSession.Message nextMessage : nextMessages) {
+            latestNextTimestamp = Math.max(latestNextTimestamp, nextMessage.timestamp);
+        }
+        if (latestNextTimestamp > lastPreviousMessage.timestamp) {
+            return nextMessages;
+        }
+
+        List<ChatSession.Message> mergedMessages = new ArrayList<>(nextMessages);
+        mergedMessages.add(lastPreviousMessage);
+        return mergedMessages;
+    }
+
+    private boolean hasMatchingTrailingUser(List<ChatSession.Message> messages, ChatSession.Message candidate) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatSession.Message message = messages.get(i);
+            if (message.type == ChatSession.Message.Type.ASSISTANT) {
+                break;
+            }
+            if (message.type == ChatSession.Message.Type.USER
+                && candidate.content.equals(message.content)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<ChatSession.Message> parseMessages(List<JsonObject> rawMessages) {
@@ -240,7 +302,14 @@ public class SessionMessageOrchestrator {
             || currentSessionId == null || currentSessionId.isBlank()
             || currentSessionId.equals(requestSessionId)
             || currentSessionId.equals(newSessionId)) {
+            String previousSessionId = currentSessionId;
             session.setSessionInfo(newSessionId, null);
+            String epoch = session.rotateRuntimeSessionEpoch();
+            LOG.info("[RuntimeSession] provider=" + session.getProvider()
+                + ", previousSessionId=" + previousSessionId
+                + ", requestSessionId=" + requestSessionId
+                + ", newSessionId=" + newSessionId
+                + ", epoch=" + epoch);
         }
     }
 

@@ -78,6 +78,8 @@ export interface InstallResult {
   requestedVersion?: string;
   /** Error message (on failure) */
   error?: string;
+  /** User-facing error message (on failure) */
+  message?: string;
   /** Installation logs */
   logs?: string;
 }
@@ -92,6 +94,8 @@ export interface UninstallResult {
   sdkId: SdkId;
   /** Error message (on failure) */
   error?: string;
+  /** User-facing error message (on failure) */
+  message?: string;
 }
 
 /**
@@ -148,6 +152,8 @@ export interface NodeEnvironmentStatus {
   npmVersion?: string;
   /** Error message */
   error?: string;
+  /** User-facing error message */
+  message?: string;
 }
 
 /**

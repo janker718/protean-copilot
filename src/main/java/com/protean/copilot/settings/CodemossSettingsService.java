@@ -48,6 +48,8 @@ public class CodemossSettingsService {
     private static final String KEY_SELECTED_AGENT_ID = "selectedAgentId";
     private static final String KEY_GLOBAL_PROMPTS = "globalPrompts";
     private static final String KEY_PROJECT_PROMPTS = "projectPrompts";
+    private static final String KEY_MCP = "mcp";
+    private static final String KEY_SERVERS = "servers";
     private static final String KEY_THINKING_ENABLED = "thinkingEnabled";
     private static final String KEY_COMMIT_PROMPT = "commitPrompt";
     private static final String KEY_PROJECT_COMMIT_PROMPT = "projectCommitPrompt";
@@ -420,6 +422,145 @@ public class CodemossSettingsService {
             }
         }
         return result;
+    }
+
+    public void addPrompt(boolean projectScope, JsonObject prompt) throws IOException {
+        if (prompt == null) {
+            return;
+        }
+        String id = extractPromptId(prompt);
+        JsonObject config = readConfig();
+        JsonObject prompts = ensureObject(config, projectScope ? KEY_PROJECT_PROMPTS : KEY_GLOBAL_PROMPTS);
+        JsonObject stored = prompt.deepCopy();
+        stored.addProperty("id", id);
+        prompts.add(id, stored);
+        writeConfig(config);
+    }
+
+    public void updatePrompt(boolean projectScope, String id, JsonObject updates) throws IOException {
+        if (id == null || id.isBlank() || updates == null) {
+            return;
+        }
+        JsonObject config = readConfig();
+        JsonObject prompts = ensureObject(config, projectScope ? KEY_PROJECT_PROMPTS : KEY_GLOBAL_PROMPTS);
+        JsonObject current = prompts.has(id) && prompts.get(id).isJsonObject()
+            ? prompts.getAsJsonObject(id).deepCopy()
+            : new JsonObject();
+        for (Map.Entry<String, com.google.gson.JsonElement> entry : updates.entrySet()) {
+            if (!"id".equals(entry.getKey())) {
+                current.add(entry.getKey(), entry.getValue().deepCopy());
+            }
+        }
+        current.addProperty("id", id);
+        prompts.add(id, current);
+        writeConfig(config);
+    }
+
+    public boolean deletePrompt(boolean projectScope, String id) throws IOException {
+        if (id == null || id.isBlank()) {
+            return false;
+        }
+        JsonObject config = readConfig();
+        JsonObject prompts = ensureObject(config, projectScope ? KEY_PROJECT_PROMPTS : KEY_GLOBAL_PROMPTS);
+        boolean existed = prompts.has(id);
+        prompts.remove(id);
+        writeConfig(config);
+        return existed;
+    }
+
+    public List<JsonObject> getMcpServers(boolean codexScope) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject mcpSection = ensureObject(config, KEY_MCP);
+        JsonObject providerSection = ensureObject(mcpSection, codexScope ? KEY_CODEX : KEY_CLAUDE);
+        JsonObject servers = ensureObject(providerSection, KEY_SERVERS);
+        List<JsonObject> result = new ArrayList<>();
+        for (Map.Entry<String, com.google.gson.JsonElement> entry : servers.entrySet()) {
+            if (!entry.getValue().isJsonObject()) {
+                continue;
+            }
+            JsonObject server = entry.getValue().getAsJsonObject().deepCopy();
+            server.addProperty("id", entry.getKey());
+            if (!server.has("name") || server.get("name").isJsonNull()) {
+                server.addProperty("name", entry.getKey());
+            }
+            if (!server.has("enabled") || server.get("enabled").isJsonNull()) {
+                server.addProperty("enabled", true);
+            }
+            result.add(server);
+        }
+        return result;
+    }
+
+    public void addMcpServer(boolean codexScope, JsonObject server) throws IOException {
+        if (server == null) {
+            return;
+        }
+        String id = normalizeRequiredId(getNullableString(server, "id"));
+        JsonObject config = readConfig();
+        JsonObject servers = mcpServersFor(config, codexScope);
+        JsonObject stored = server.deepCopy();
+        stored.addProperty("id", id);
+        if (!stored.has("name") || stored.get("name").isJsonNull()) {
+            stored.addProperty("name", id);
+        }
+        if (!stored.has("enabled") || stored.get("enabled").isJsonNull()) {
+            stored.addProperty("enabled", true);
+        }
+        servers.add(id, stored);
+        writeConfig(config);
+    }
+
+    public void updateMcpServer(boolean codexScope, String id, JsonObject updates) throws IOException {
+        String normalizedId = normalizeRequiredId(id);
+        JsonObject config = readConfig();
+        JsonObject servers = mcpServersFor(config, codexScope);
+        JsonObject server = servers.has(normalizedId) && servers.get(normalizedId).isJsonObject()
+            ? servers.getAsJsonObject(normalizedId).deepCopy()
+            : new JsonObject();
+        if (updates != null) {
+            for (Map.Entry<String, com.google.gson.JsonElement> entry : updates.entrySet()) {
+                if (!"id".equals(entry.getKey())) {
+                    server.add(entry.getKey(), entry.getValue().deepCopy());
+                }
+            }
+        }
+        server.addProperty("id", normalizedId);
+        if (!server.has("name") || server.get("name").isJsonNull()) {
+            server.addProperty("name", normalizedId);
+        }
+        if (!server.has("enabled") || server.get("enabled").isJsonNull()) {
+            server.addProperty("enabled", true);
+        }
+        servers.add(normalizedId, server);
+        writeConfig(config);
+    }
+
+    public boolean deleteMcpServer(boolean codexScope, String id) throws IOException {
+        if (id == null || id.isBlank()) {
+            return false;
+        }
+        JsonObject config = readConfig();
+        JsonObject servers = mcpServersFor(config, codexScope);
+        boolean existed = servers.has(id);
+        servers.remove(id);
+        writeConfig(config);
+        return existed;
+    }
+
+    public void setMcpServerEnabled(boolean codexScope, String id, boolean enabled) throws IOException {
+        String normalizedId = normalizeRequiredId(id);
+        JsonObject config = readConfig();
+        JsonObject servers = mcpServersFor(config, codexScope);
+        JsonObject server = servers.has(normalizedId) && servers.get(normalizedId).isJsonObject()
+            ? servers.getAsJsonObject(normalizedId).deepCopy()
+            : new JsonObject();
+        server.addProperty("id", normalizedId);
+        if (!server.has("name") || server.get("name").isJsonNull()) {
+            server.addProperty("name", normalizedId);
+        }
+        server.addProperty("enabled", enabled);
+        servers.add(normalizedId, server);
+        writeConfig(config);
     }
 
     public boolean isThinkingEnabled() throws IOException {
@@ -838,6 +979,9 @@ public class CodemossSettingsService {
         ensureObject(config, KEY_AGENTS);
         ensureObject(config, KEY_GLOBAL_PROMPTS);
         ensureObject(config, KEY_PROJECT_PROMPTS);
+        JsonObject mcp = ensureObject(config, KEY_MCP);
+        ensureObject(ensureObject(mcp, KEY_CLAUDE), KEY_SERVERS);
+        ensureObject(ensureObject(mcp, KEY_CODEX), KEY_SERVERS);
         if (!config.has(KEY_THINKING_ENABLED)) {
             config.addProperty(KEY_THINKING_ENABLED, false);
         }
@@ -1147,6 +1291,28 @@ public class CodemossSettingsService {
         }
         String value = object.get(key).getAsString();
         return value == null || value.trim().isEmpty() ? null : value.trim();
+    }
+
+    private JsonObject mcpServersFor(JsonObject config, boolean codexScope) {
+        JsonObject mcpSection = ensureObject(config, KEY_MCP);
+        JsonObject providerSection = ensureObject(mcpSection, codexScope ? KEY_CODEX : KEY_CLAUDE);
+        return ensureObject(providerSection, KEY_SERVERS);
+    }
+
+    private static String extractPromptId(JsonObject prompt) {
+        if (prompt.has("id") && !prompt.get("id").isJsonNull()) {
+            String value = prompt.get("id").getAsString();
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        if (prompt.has("name") && !prompt.get("name").isJsonNull()) {
+            String value = prompt.get("name").getAsString();
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return UUID.randomUUID().toString();
     }
 
     private static String extractAgentId(JsonObject agent) {

@@ -57,7 +57,7 @@ final class PermissionModeHandler {
     private static String normalize(String mode) {
         return switch (mode) {
             case "default", "acceptEdits", "plan", "bypassPermissions" -> mode;
-            default -> "bypassPermissions";
+            default -> "default";
         };
     }
 }

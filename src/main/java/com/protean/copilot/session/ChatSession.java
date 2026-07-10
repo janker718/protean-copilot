@@ -80,7 +80,7 @@ public class ChatSession {
     private volatile String summary;
     private volatile long lastModifiedTime = System.currentTimeMillis();
     private volatile String cwd;
-    private volatile String permissionMode = "bypassPermissions";
+    private volatile String permissionMode = "default";
     private volatile String model = "default";
     private volatile String provider;
     private volatile String reasoningEffort;

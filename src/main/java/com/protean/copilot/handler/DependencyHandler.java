@@ -12,12 +12,19 @@ import com.protean.copilot.dependency.UpdateInfo;
 import com.protean.copilot.handler.core.BaseMessageHandler;
 import com.protean.copilot.handler.core.HandlerContext;
 import com.protean.copilot.provider.claude.NodeDetectionResult;
+import com.protean.copilot.session.SessionRuntimeMessages;
 import com.protean.copilot.settings.SettingsService;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 public class DependencyHandler extends BaseMessageHandler {
+
+    interface NodePathSettings {
+        String getNodePath();
+    }
 
     private static final Logger LOG = Logger.getInstance(DependencyHandler.class);
 
@@ -32,12 +39,33 @@ public class DependencyHandler extends BaseMessageHandler {
     );
 
     private final Gson gson = new Gson();
-    private final SettingsService settingsService = new SettingsService();
-    private final NodeDetector nodeDetector = NodeDetector.getInstance();
-    private final DependencyManager dependencyManager = new DependencyManager(nodeDetector);
+    private final NodePathSettings nodePathSettings;
+    private final Consumer<String> nodePathWarmer;
+    private final Supplier<NodeDetectionResult> nodeEnvironmentSupplier;
+    private final DependencyManager dependencyManager;
 
     public DependencyHandler(HandlerContext context) {
+        this(
+            context,
+            new SettingsService()::getNodePath,
+            NodeDetector.getInstance()::verifyAndCacheNodePath,
+            NodeDetector.getInstance()::detectNodeWithDetails,
+            new DependencyManager(NodeDetector.getInstance())
+        );
+    }
+
+    DependencyHandler(
+        HandlerContext context,
+        NodePathSettings nodePathSettings,
+        Consumer<String> nodePathWarmer,
+        Supplier<NodeDetectionResult> nodeEnvironmentSupplier,
+        DependencyManager dependencyManager
+    ) {
         super(context);
+        this.nodePathSettings = nodePathSettings;
+        this.nodePathWarmer = nodePathWarmer;
+        this.nodeEnvironmentSupplier = nodeEnvironmentSupplier;
+        this.dependencyManager = dependencyManager;
     }
 
     @Override
@@ -64,9 +92,9 @@ public class DependencyHandler extends BaseMessageHandler {
     }
 
     private void warmConfiguredNodePath() {
-        String configured = settingsService.getNodePath();
+        String configured = nodePathSettings.getNodePath();
         if (configured != null && !configured.isBlank()) {
-            nodeDetector.verifyAndCacheNodePath(configured);
+            nodePathWarmer.accept(configured);
         }
     }
 
@@ -93,6 +121,7 @@ public class DependencyHandler extends BaseMessageHandler {
                 result.addProperty("success", false);
                 result.addProperty("sdkId", sdkId);
                 result.addProperty("error", "node_not_configured");
+                result.addProperty("message", SessionRuntimeMessages.dependencyNodeNotConfigured());
                 pushJavascript("window.dependencyInstallResult", result);
                 return;
             }
@@ -104,7 +133,7 @@ public class DependencyHandler extends BaseMessageHandler {
                 pushJavascript("window.dependencyInstallProgress", progress);
             });
 
-            pushJavascript("window.dependencyInstallResult", toJson(installResult));
+            pushJavascript("window.dependencyInstallResult", toJson(installResult, sdkId));
             if (installResult.success()) {
                 pushJavascript("window.updateDependencyStatus", dependencyManager.getAllSdkStatus());
             }
@@ -114,6 +143,7 @@ public class DependencyHandler extends BaseMessageHandler {
             result.addProperty("success", false);
             result.addProperty("sdkId", sdkId);
             result.addProperty("error", ex.getMessage());
+            result.addProperty("message", SessionRuntimeMessages.dependencyInstallFailed(sdkDisplayName(sdkId), ex.getMessage()));
             pushJavascript("window.dependencyInstallResult", result);
             return null;
         });
@@ -131,6 +161,7 @@ public class DependencyHandler extends BaseMessageHandler {
             } catch (Exception e) {
                 result.addProperty("success", false);
                 result.addProperty("error", e.getMessage());
+                result.addProperty("message", SessionRuntimeMessages.dependencyUninstallFailed(sdkDisplayName(sdkId), e.getMessage()));
             }
             pushJavascript("window.dependencyUninstallResult", result);
             pushJavascript("window.updateDependencyStatus", dependencyManager.getAllSdkStatus());
@@ -176,7 +207,7 @@ public class DependencyHandler extends BaseMessageHandler {
     }
 
     private void handleCheckNodeEnvironment() {
-        NodeDetectionResult result = nodeDetector.detectNodeWithDetails();
+        NodeDetectionResult result = nodeEnvironmentSupplier.get();
         JsonObject payload = new JsonObject();
         payload.addProperty("available", result.available());
         payload.addProperty("nodePath", result.nodePath());
@@ -197,8 +228,19 @@ public class DependencyHandler extends BaseMessageHandler {
         return payload;
     }
 
-    private JsonObject toJson(InstallResult result) {
-        return gson.toJsonTree(result).getAsJsonObject();
+    private JsonObject toJson(InstallResult result, String sdkId) {
+        JsonObject payload = gson.toJsonTree(result).getAsJsonObject();
+        if (!result.success()) {
+            if ("node_not_configured".equals(result.error())) {
+                payload.addProperty("message", SessionRuntimeMessages.dependencyNodeNotConfigured());
+            } else {
+                payload.addProperty(
+                    "message",
+                    SessionRuntimeMessages.dependencyInstallFailed(sdkDisplayName(sdkId), result.error())
+                );
+            }
+        }
+        return payload;
     }
 
     private JsonObject toJson(UpdateInfo result) {
@@ -207,7 +249,7 @@ public class DependencyHandler extends BaseMessageHandler {
 
     private JsonObject buildStatusErrorPayload(Throwable throwable) {
         JsonObject payload = new JsonObject();
-        String message = throwable.getMessage() != null ? throwable.getMessage() : throwable.getClass().getSimpleName();
+        String message = SessionRuntimeMessages.dependencyStatusUnavailable(throwable);
 
         for (SdkDefinition sdk : SdkDefinition.values()) {
             JsonObject status = new JsonObject();
@@ -221,6 +263,11 @@ public class DependencyHandler extends BaseMessageHandler {
         }
 
         return payload;
+    }
+
+    private String sdkDisplayName(String sdkId) {
+        SdkDefinition sdk = SdkDefinition.fromId(sdkId);
+        return sdk != null ? sdk.getDisplayName() : sdkId;
     }
 
     private void pushJavascript(String functionName, JsonObject payload) {

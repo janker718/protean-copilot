@@ -49,4 +49,26 @@ public class SessionRuntimeMessagesTest {
         assertTrue(message.contains("version 0.143.0"));
         assertTrue(message.contains("Install the locked Codex SDK before retrying."));
     }
+
+    @Test
+    public void normalizesDependencyInstallPermissionDenied() {
+        String message = SessionRuntimeMessages.dependencyInstallFailed(
+            "Codex SDK",
+            "approval denied for apply_patch"
+        );
+
+        assertEquals(
+            "Codex SDK permission request was denied. approval denied for apply_patch.",
+            message
+        );
+    }
+
+    @Test
+    public void normalizesDependencyStatusFailure() {
+        String message = SessionRuntimeMessages.dependencyStatusUnavailable(
+            new IllegalStateException("status backend exploded")
+        );
+
+        assertEquals("Dependency status unavailable. status backend exploded.", message);
+    }
 }

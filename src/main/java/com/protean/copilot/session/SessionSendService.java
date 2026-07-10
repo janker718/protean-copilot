@@ -3,6 +3,7 @@ package com.protean.copilot.session;
 import com.protean.copilot.bridge.SdkBridge;
 import com.protean.copilot.provider.claude.ClaudeSDKBridge;
 import com.protean.copilot.provider.codex.CodexSDKBridge;
+import com.protean.copilot.settings.CodemossSettingsService;
 import com.protean.copilot.settings.SettingsService;
 import com.protean.copilot.settings.manager.WorkingDirectoryManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -10,6 +11,7 @@ import com.intellij.openapi.project.Project;
 
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 
 /**
  * 负责消息发送编排，使 ChatSession 保持为轻量级会话门面。
@@ -18,6 +20,23 @@ import java.util.concurrent.CompletableFuture;
  * 当前落地 Claude 与 Codex 的统一发送入口。</p>
  */
 public class SessionSendService {
+
+    interface PermissionModeStore {
+        void setPermissionMode(String mode);
+    }
+
+    private static final class SettingsPermissionModeStore implements PermissionModeStore {
+        private final SettingsService settingsService;
+
+        private SettingsPermissionModeStore(SettingsService settingsService) {
+            this.settingsService = settingsService;
+        }
+
+        @Override
+        public void setPermissionMode(String mode) {
+            settingsService.setPermissionMode(mode);
+        }
+    }
 
     private static final Logger LOG = Logger.getInstance(SessionSendService.class);
 
@@ -35,13 +54,33 @@ public class SessionSendService {
     );
 
     private final Project project;
-    private final SettingsService settingsService;
+    private final PermissionModeStore permissionModeStore;
     private final SdkBridge sdkBridge;
+    private final Supplier<String> workingDirectorySupplier;
+    private final CodemossSettingsService codemossSettingsService;
 
     public SessionSendService(Project project, SdkBridge sdkBridge) {
+        this(
+            project,
+            sdkBridge,
+            new SettingsPermissionModeStore(new SettingsService()),
+            () -> WorkingDirectoryManager.getInstance(project).resolveWorkingDirectory(),
+            new CodemossSettingsService()
+        );
+    }
+
+    SessionSendService(
+        Project project,
+        SdkBridge sdkBridge,
+        PermissionModeStore permissionModeStore,
+        Supplier<String> workingDirectorySupplier,
+        CodemossSettingsService codemossSettingsService
+    ) {
         this.project = project;
-        this.settingsService = new SettingsService();
+        this.permissionModeStore = permissionModeStore;
         this.sdkBridge = sdkBridge;
+        this.workingDirectorySupplier = workingDirectorySupplier;
+        this.codemossSettingsService = codemossSettingsService;
     }
 
     public CompletableFuture<Void> sendMessageToProvider(
@@ -98,13 +137,13 @@ public class SessionSendService {
 
         if (effectivePermissionMode != null) {
             session.setPermissionMode(effectivePermissionMode);
-            settingsService.setPermissionMode(effectivePermissionMode);
+            permissionModeStore.setPermissionMode(effectivePermissionMode);
         }
         if (normalizedRequestedEffort != null) {
             session.setReasoningEffort(normalizedRequestedEffort);
         }
         if (session.getCwd() == null || session.getCwd().isBlank()) {
-            session.setCwd(WorkingDirectoryManager.getInstance(project).resolveWorkingDirectory());
+            session.setCwd(workingDirectorySupplier.get());
         }
 
         SessionCallbackAdapter callback = session.getCallback();
@@ -155,6 +194,17 @@ public class SessionSendService {
         return resolvedMode;
     }
 
+    public static String getCodexRuntimeAccessError(String runtimeAccessMode) {
+        if (runtimeAccessMode == null || runtimeAccessMode.isBlank()) {
+            return SessionRuntimeMessages.codexRuntimeAccessUnavailable();
+        }
+        return switch (runtimeAccessMode.trim()) {
+            case CodemossSettingsService.CODEX_RUNTIME_ACCESS_MANAGED,
+                 CodemossSettingsService.CODEX_RUNTIME_ACCESS_CLI_LOGIN -> null;
+            default -> SessionRuntimeMessages.codexRuntimeAccessUnavailable();
+        };
+    }
+
     private CompletableFuture<Void> sendToClaude(
         ChatSession session,
         String input,
@@ -169,7 +219,7 @@ public class SessionSendService {
         }
 
         if (session.requiresProviderResume()) {
-            LOG.info("[SessionSend] resuming Codex thread=" + session.getSessionId()
+            LOG.info("[SessionSend] resuming Claude session=" + session.getSessionId()
                 + ", permissionMode=" + effectivePermissionMode);
             return bridge.resumeSession(
                 session.getSessionId(),
@@ -195,12 +245,43 @@ public class SessionSendService {
         String effectivePermissionMode,
         String requestedReasoningEffort
     ) {
+        String runtimeAccessMode;
+        try {
+            runtimeAccessMode = codemossSettingsService.getCodexRuntimeAccessMode();
+        } catch (Exception e) {
+            LOG.warn("[SessionSend] failed to read Codex runtime access mode: " + e.getMessage(), e);
+            runtimeAccessMode = CodemossSettingsService.CODEX_RUNTIME_ACCESS_INACTIVE;
+        }
+        String runtimeAccessError = getCodexRuntimeAccessError(runtimeAccessMode);
+        if (runtimeAccessError != null) {
+            LOG.warn("[SessionSend] refusing Codex send because runtime access is unavailable: " + runtimeAccessMode);
+            return CompletableFuture.failedFuture(new IllegalStateException(runtimeAccessError));
+        }
+
         CodexSDKBridge bridge = sdkBridge.getCodexBridge();
         if (bridge == null || !bridge.isRunning()) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Codex SDK bridge is not running")
             );
         }
+
+        if (session.requiresProviderResume()) {
+            LOG.info("[SessionSend] resuming Codex thread=" + session.getSessionId()
+                + ", permissionMode=" + effectivePermissionMode
+                + ", runtimeAccessMode=" + runtimeAccessMode
+                + ", epoch=" + session.getRuntimeSessionEpoch());
+            return bridge.resumeSession(
+                session.getSessionId(),
+                input != null ? input : "",
+                session.getCwd(),
+                effectivePermissionMode
+            ).thenRun(session::clearProviderResumeRequired);
+        }
+
+        LOG.info("[SessionSend] querying Codex thread=" + session.getSessionId()
+            + ", permissionMode=" + effectivePermissionMode
+            + ", runtimeAccessMode=" + runtimeAccessMode
+            + ", epoch=" + session.getRuntimeSessionEpoch());
 
         return bridge.query(
             session.getSessionId(),

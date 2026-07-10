@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.diagnostic.Logger;
+import com.protean.copilot.bridge.EnvironmentConfigurator;
 import com.protean.copilot.bridge.NodeDetector;
 import com.protean.copilot.provider.claude.NodeDetectionResult;
 
@@ -26,9 +27,15 @@ public class DependencyManager {
     private static final Gson GSON = new Gson();
 
     private final NodeDetector nodeDetector;
+    private final EnvironmentConfigurator environmentConfigurator;
 
     public DependencyManager(NodeDetector nodeDetector) {
+        this(nodeDetector, new EnvironmentConfigurator());
+    }
+
+    DependencyManager(NodeDetector nodeDetector, EnvironmentConfigurator environmentConfigurator) {
         this.nodeDetector = nodeDetector;
+        this.environmentConfigurator = environmentConfigurator;
     }
 
     public Path getDependenciesDir() {
@@ -101,6 +108,7 @@ public class DependencyManager {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(sdkDir.toFile());
             pb.redirectErrorStream(true);
+            environmentConfigurator.configureProcessEnvironment(pb, node.nodePath(), null);
 
             log.accept("Installing " + sdk.getDisplayName() + " " + resolvedVersion);
             Process process = pb.start();

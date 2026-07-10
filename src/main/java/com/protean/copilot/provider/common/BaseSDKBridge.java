@@ -4,6 +4,9 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.protean.copilot.bridge.BridgeDirectoryResolver;
+import com.protean.copilot.bridge.EnvironmentConfigurator;
+import com.protean.copilot.bridge.ProcessManager;
 import com.protean.copilot.session.SessionRuntimeMessages;
 import com.intellij.openapi.diagnostic.Logger;
 
@@ -77,8 +80,8 @@ public abstract class BaseSDKBridge {
 
     // ==================== 日志 & JSON ====================
 
-    /** 日志记录器（子类可通过 {@link #log()} 访问） */
-    private final Logger LOG = Logger.getInstance(getClass());
+    /** 日志记录器（延迟按运行时类解析，避免在父类字段初始化阶段触发子类抽象方法依赖） */
+    private Logger LOG;
 
     /** 全局共享的 Gson 实例，用于 JSON 序列化/反序列化 */
     protected static final Gson GSON = new GsonBuilder()
@@ -117,6 +120,10 @@ public abstract class BaseSDKBridge {
 
     /** 写入操作的同步锁，确保线程安全 */
     private final Object writerLock = new Object();
+
+    private BridgeDirectoryResolver bridgeDirectoryResolver;
+    private EnvironmentConfigurator environmentConfigurator;
+    private ProcessManager processManager;
 
     // ==================== 会话管理 ====================
 
@@ -173,7 +180,31 @@ public abstract class BaseSDKBridge {
 
     /** 获取日志记录器（子类可在覆写方法中使用）。 */
     protected Logger log() {
+        if (LOG == null) {
+            LOG = Logger.getInstance(getClass());
+        }
         return LOG;
+    }
+
+    private BridgeDirectoryResolver bridgeDirectoryResolver() {
+        if (bridgeDirectoryResolver == null) {
+            bridgeDirectoryResolver = new BridgeDirectoryResolver();
+        }
+        return bridgeDirectoryResolver;
+    }
+
+    private EnvironmentConfigurator environmentConfigurator() {
+        if (environmentConfigurator == null) {
+            environmentConfigurator = new EnvironmentConfigurator();
+        }
+        return environmentConfigurator;
+    }
+
+    private ProcessManager processManager() {
+        if (processManager == null) {
+            processManager = new ProcessManager();
+        }
+        return processManager;
     }
 
     // ==================== 生命周期方法 ====================
@@ -186,31 +217,17 @@ public abstract class BaseSDKBridge {
      */
     protected String extractBridgeScript(String resourcePath) {
         try {
-            InputStream is = getClass().getClassLoader().getResourceAsStream(resourcePath);
-            if (is == null) {
-                LOG.error("桥接脚本资源不存在: " + resourcePath);
-                return null;
-            }
-
-            String scriptContent;
-            try (is) {
-                scriptContent = new String(is.readAllBytes(), StandardCharsets.UTF_8);
-            }
-
-            Path tempDir = Path.of(System.getProperty("java.io.tmpdir"), "protean-copilot");
-            Files.createDirectories(tempDir);
-
-            // 用资源路径的文件名作为临时文件名
-            String fileName = Path.of(resourcePath).getFileName().toString();
-            Path scriptFile = tempDir.resolve(fileName);
-            Files.writeString(scriptFile, scriptContent);
-
+            Path scriptFile = bridgeDirectoryResolver().resolveBridgeScript(
+                getProviderName(),
+                resourcePath,
+                getClass().getClassLoader()
+            );
             String path = scriptFile.toAbsolutePath().toString();
-            LOG.info("桥接脚本已提取到: " + path);
+            log().info("桥接脚本已提取到: " + path);
             return path;
 
         } catch (Exception e) {
-            LOG.error("提取桥接脚本失败: " + e.getMessage(), e);
+            log().error("提取桥接脚本失败: " + e.getMessage(), e);
             return null;
         }
     }
@@ -241,27 +258,20 @@ public abstract class BaseSDKBridge {
             throw new FileNotFoundException("桥接脚本不存在：" + scriptPath);
         }
 
-        LOG.info("正在启动 " + getProviderName() + " SDK 桥接进程...");
-        LOG.info("  Node.js 路径: " + nodePath);
-        LOG.info("  脚本路径: " + scriptPath);
+        log().info("正在启动 " + getProviderName() + " SDK 桥接进程...");
+        log().info("  Node.js 路径: " + nodePath);
+        log().info("  脚本路径: " + scriptPath);
 
         // 构建进程：node <scriptPath>
         ProcessBuilder pb = new ProcessBuilder(nodePath, scriptPath);
         pb.environment().put("NODE_ENV", "production");
-
-        for (Map.Entry<String, String> entry : getBridgeEnvironment().entrySet()) {
-            if (entry.getKey() != null && !entry.getKey().isBlank()
-                && entry.getValue() != null && !entry.getValue().isBlank()) {
-                pb.environment().put(entry.getKey(), entry.getValue());
-                LOG.info("  " + entry.getKey() + ": " + entry.getValue());
-            }
-        }
+        environmentConfigurator().configureProcessEnvironment(pb, nodePath, getBridgeEnvironment());
 
         // 保留 NODE_PATH 以兼容依赖该机制的旧 bridge。
         String nodePathEnv = resolveNodePath(scriptPath);
         if (nodePathEnv != null && !nodePathEnv.isEmpty()) {
             pb.environment().put("NODE_PATH", nodePathEnv);
-            LOG.info("  NODE_PATH: " + nodePathEnv);
+            log().info("  NODE_PATH: " + nodePathEnv);
         }
 
         // 设置工作目录为脚本所在目录（便于 Node.js 解析相对路径模块）
@@ -270,8 +280,9 @@ public abstract class BaseSDKBridge {
 
         try {
             nodeProcess = pb.start();
+            processManager().register(getProviderName() + "-bridge", nodeProcess);
         } catch (IOException e) {
-            LOG.error("无法启动 Node.js 进程: " + e.getMessage());
+            log().error("无法启动 Node.js 进程: " + e.getMessage());
             throw new IOException("启动 Node.js 进程失败，请确认 Node.js 已安装且在 PATH 中: " + e.getMessage(), e);
         }
 
@@ -288,11 +299,11 @@ public abstract class BaseSDKBridge {
                 new InputStreamReader(nodeProcess.getErrorStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = stderrReader.readLine()) != null) {
-                    LOG.info("[node-stderr] " + line);
+                    log().info("[node-stderr] " + line);
                 }
             } catch (IOException e) {
                 if (!shutdownRequested.get()) {
-                    LOG.warn("读取 Node.js stderr 时出错: " + e.getMessage());
+                    log().warn("读取 Node.js stderr 时出错: " + e.getMessage());
                 }
             }
         }, stderrThreadName);
@@ -309,7 +320,7 @@ public abstract class BaseSDKBridge {
         running = true;
         shutdownRequested.set(false);
 
-        LOG.info("等待 Node.js 桥接就绪...");
+        log().info("等待 Node.js 桥接就绪...");
     }
 
     /**
@@ -326,7 +337,7 @@ public abstract class BaseSDKBridge {
                 start(nodePath);
                 future.complete(null);
             } catch (Exception e) {
-                LOG.error("异步启动 " + getProviderName() + "SDKBridge 失败: " + e.getMessage(), e);
+                log().error("异步启动 " + getProviderName() + "SDKBridge 失败: " + e.getMessage(), e);
                 future.completeExceptionally(e);
             }
         }, threadName);
@@ -345,7 +356,7 @@ public abstract class BaseSDKBridge {
         }
 
         shutdownRequested.set(true);
-        LOG.info("正在关闭 " + getProviderName() + " SDK 桥接...");
+        log().info("正在关闭 " + getProviderName() + " SDK 桥接...");
 
         // 先完成所有活跃会话的 Future（异常完成）
         for (SessionState state : activeSessions.values()) {
@@ -363,7 +374,7 @@ public abstract class BaseSDKBridge {
             shutdownMsg.addProperty("type", "shutdown");
             writeMessage(shutdownMsg);
         } catch (Exception e) {
-            LOG.warn("发送 shutdown 命令时出错: " + e.getMessage());
+            log().warn("发送 shutdown 命令时出错: " + e.getMessage());
         }
 
         // 等待进程退出（最多 5 秒）
@@ -377,8 +388,8 @@ public abstract class BaseSDKBridge {
 
         // 强制终止
         if (nodeProcess != null && nodeProcess.isAlive()) {
-            LOG.warn("Node.js 进程未在超时内退出，强制终止");
-            nodeProcess.destroyForcibly();
+            log().warn("Node.js 进程未在超时内退出，强制终止");
+            processManager().terminate(nodeProcess, getProviderName() + "-bridge");
         }
 
         // 清理资源
@@ -390,6 +401,9 @@ public abstract class BaseSDKBridge {
         }
 
         nodeProcess = null;
+        if (processManager != null) {
+            processManager.cleanup();
+        }
         stdoutReader = null;
         stdinWriter = null;
         readerThread = null;
@@ -399,7 +413,7 @@ public abstract class BaseSDKBridge {
             shutdownLatch.countDown();
         }
 
-        LOG.info(getProviderName() + " SDK 桥接已完全关闭");
+        log().info(getProviderName() + " SDK 桥接已完全关闭");
     }
 
     /**
@@ -445,7 +459,7 @@ public abstract class BaseSDKBridge {
             id -> new SessionState(id, cwd));
 
         if (state.streaming && state.responseFuture != null && !state.responseFuture.isDone()) {
-            LOG.info("会话 " + sessionId + " 有查询正在运行，先中断再发起新查询");
+            log().info("会话 " + sessionId + " 有查询正在运行，先中断再发起新查询");
             interrupt(sessionId);
         }
 
@@ -459,17 +473,17 @@ public abstract class BaseSDKBridge {
             prompt,
             cwd,
             effectiveModel,
-            permissionMode != null ? permissionMode : "bypassPermissions",
+            permissionMode != null ? permissionMode : "default",
             reasoningEffort
         );
 
         try {
             writeMessage(msg);
-            LOG.info("已发送查询: sessionId=" + sessionId
+            log().info("已发送查询: sessionId=" + sessionId
                 + ", prompt长度=" + prompt.length()
                 + ", model=" + effectiveModel);
         } catch (Exception e) {
-            LOG.error("发送查询失败: " + e.getMessage(), e);
+            log().error("发送查询失败: " + e.getMessage(), e);
             state.streaming = false;
             future.completeExceptionally(e);
         }
@@ -497,9 +511,9 @@ public abstract class BaseSDKBridge {
 
         try {
             writeMessage(msg);
-            LOG.info("已发送中断: sessionId=" + sessionId);
+            log().info("已发送中断: sessionId=" + sessionId);
         } catch (Exception e) {
-            LOG.warn("发送中断消息失败: " + e.getMessage());
+            log().warn("发送中断消息失败: " + e.getMessage());
         }
 
         if (state.responseFuture != null && !state.responseFuture.isDone()) {
@@ -544,9 +558,9 @@ public abstract class BaseSDKBridge {
 
         try {
             writeMessage(msg);
-            LOG.info("已发送恢复会话: sessionId=" + sessionId);
+            log().info("已发送恢复会话: sessionId=" + sessionId);
         } catch (Exception e) {
-            LOG.error("发送恢复会话失败: " + e.getMessage(), e);
+            log().error("发送恢复会话失败: " + e.getMessage(), e);
             state.streaming = false;
             future.completeExceptionally(e);
         }
@@ -564,6 +578,25 @@ public abstract class BaseSDKBridge {
     /** 获取当前的前端回调。 */
     public BridgeCallback getCallback() {
         return callback;
+    }
+
+    /** Expose the underlying Node.js bridge process for node-process inspection UI. */
+    public Process getNodeProcessForInspection() {
+        return nodeProcess;
+    }
+
+    /** Return the number of active sessions currently tracked by this bridge. */
+    public int getActiveRequestCountForInspection() {
+        int count = 0;
+        for (SessionState state : activeSessions.values()) {
+            if (state == null || state.responseFuture == null) {
+                continue;
+            }
+            if (!state.responseFuture.isDone()) {
+                count++;
+            }
+        }
+        return count;
     }
 
     // ==================== 内部：写入器 ====================
@@ -595,16 +628,16 @@ public abstract class BaseSDKBridge {
      * Reader 线程主循环 —— 从 Node.js stdout 逐行读取 JSON 并分发处理。
      */
     private void readerLoop() {
-        LOG.info("Reader 线程已启动");
+        log().info("Reader 线程已启动");
         try {
             String line;
             while ((line = stdoutReader.readLine()) != null) {
                 processLine(line);
             }
-            LOG.info("Node.js stdout 已关闭（EOF）");
+            log().info("Node.js stdout 已关闭（EOF）");
         } catch (IOException e) {
             if (!shutdownRequested.get()) {
-                LOG.error("Reader 线程异常: " + e.getMessage(), e);
+                log().error("Reader 线程异常: " + e.getMessage(), e);
             }
         } finally {
             handleProcessExit();
@@ -620,7 +653,7 @@ public abstract class BaseSDKBridge {
             JsonObject message = JSON_PARSER.parse(trimmed).getAsJsonObject();
             dispatchMessage(message);
         } catch (Exception e) {
-            LOG.warn("无法解析来自 Node.js 的消息: " + e.getMessage()
+            log().warn("无法解析来自 Node.js 的消息: " + e.getMessage()
                 + ", 原始内容: " + (trimmed.length() > 200 ? trimmed.substring(0, 200) + "..." : trimmed));
         }
     }
@@ -644,7 +677,7 @@ public abstract class BaseSDKBridge {
             case "streaming_heartbeat"-> handleStreamingHeartbeat(message);
             case "error"              -> handleError(message);
             case "prewarmed"          -> handlePrewarmed(message);
-            default                   -> LOG.info("未知消息类型: " + type);
+            default                   -> log().info("未知消息类型: " + type);
         }
     }
 
@@ -675,9 +708,9 @@ public abstract class BaseSDKBridge {
         if (sdkPackage != null) {
             summary.append(", package=").append(sdkPackage);
         }
-        LOG.info(summary.toString());
+        log().info(summary.toString());
         if (!sdkAvailable) {
-            LOG.warn(getProviderName() + " SDK 不可用"
+            log().warn(getProviderName() + " SDK 不可用"
                 + (importError != null ? ", importError=" + importError : "")
                 + (hint != null ? ", hint=" + hint : ""));
             invokeJsCallback("updateStatus", getProviderName() + " runtime not ready");
@@ -698,7 +731,7 @@ public abstract class BaseSDKBridge {
 
         if (sessionId != null) {
             remapSessionState(requestSessionId, sessionId, cwd);
-            LOG.info("会话已创建: sessionId=" + sessionId + ", cwd=" + cwd);
+            log().info("会话已创建: sessionId=" + sessionId + ", cwd=" + cwd);
             if (requestSessionId != null && !requestSessionId.isBlank()) {
                 invokeJsCallback("updateSessionId", sessionId, requestSessionId);
             } else {
@@ -711,7 +744,7 @@ public abstract class BaseSDKBridge {
     private void handleStreamStart(JsonObject message) {
         String sessionId = message.has("sessionId")
             ? message.get("sessionId").getAsString() : null;
-        LOG.info("流开始: sessionId=" + sessionId);
+        log().info("流开始: sessionId=" + sessionId);
         invokeJsCallback("onStreamStart");
         invokeJsCallback("showLoading", "true");
     }
@@ -746,7 +779,7 @@ public abstract class BaseSDKBridge {
         String toolInput = message.has("toolInput")
             ? message.get("toolInput").toString() : "{}";
 
-        LOG.info("工具调用: " + toolName + " (id=" + toolUseId + ")");
+        log().info("工具调用: " + toolName + " (id=" + toolUseId + ")");
         invokeJsCallback("onToolUse", toolName, toolInput);
     }
 
@@ -756,7 +789,7 @@ public abstract class BaseSDKBridge {
             ? message.get("toolUseId").getAsString() : "";
         boolean isError = message.has("isError") && message.get("isError").getAsBoolean();
 
-        LOG.info("工具结果: id=" + toolUseId + ", 是否出错=" + isError);
+        log().info("工具结果: id=" + toolUseId + ", 是否出错=" + isError);
         invokeJsCallback("onToolResult", toolUseId, String.valueOf(isError));
     }
 
@@ -773,7 +806,7 @@ public abstract class BaseSDKBridge {
         if (text.isBlank()) {
             return;
         }
-        LOG.info("状态[" + getProviderName() + "]: " + text);
+        log().info("状态[" + getProviderName() + "]: " + text);
         invokeJsCallback("updateStatus", text);
     }
 
@@ -784,7 +817,7 @@ public abstract class BaseSDKBridge {
         boolean interrupted = message.has("interrupted")
             && message.get("interrupted").getAsBoolean();
 
-        LOG.info("流结束: sessionId=" + sessionId + ", 是否中断=" + interrupted);
+        log().info("流结束: sessionId=" + sessionId + ", 是否中断=" + interrupted);
 
         if (sessionId != null) {
             SessionState state = activeSessions.get(sessionId);
@@ -818,7 +851,7 @@ public abstract class BaseSDKBridge {
         boolean recoverable = message.has("recoverable") && message.get("recoverable").getAsBoolean();
         String uiMessage = formatBridgeError(errorCode, errorMsg, phase, hint);
 
-        LOG.warn("SDK 错误[" + getProviderName() + "]: [" + errorCode + "] " + errorMsg
+        log().warn("SDK 错误[" + getProviderName() + "]: [" + errorCode + "] " + errorMsg
             + (sessionId != null ? ", sessionId=" + sessionId : "")
             + (phase != null ? ", phase=" + phase : "")
             + (recoverable ? ", recoverable=true" : "")
@@ -853,12 +886,12 @@ public abstract class BaseSDKBridge {
         if (state != null && state.responseFuture != null && !state.responseFuture.isDone()) {
             if ("ok".equals(status)) {
                 state.responseFuture.complete(null);
-                LOG.info(getProviderName() + " SDK prewarm 完成");
+                log().info(getProviderName() + " SDK prewarm 完成");
             } else {
                 String error = message.has("error")
                     ? message.get("error").getAsString() : "prewarm failed";
                 state.responseFuture.completeExceptionally(new RuntimeException(error));
-                LOG.warn(getProviderName() + " SDK prewarm 失败: " + error);
+                log().warn(getProviderName() + " SDK prewarm 失败: " + error);
             }
         }
         activeSessions.remove("__prewarm__");
@@ -877,7 +910,7 @@ public abstract class BaseSDKBridge {
      *
      * @param cwd            工作目录（项目根路径），可为 null
      * @param model          模型标识符（为 null 时使用默认）
-     * @param permissionMode 权限模式（为 null 时使用 "bypassPermissions"）
+     * @param permissionMode 权限模式（为 null 时使用 "default"）
      * @return 在 SDK 预加载完成时完成的 CompletableFuture
      */
     public CompletableFuture<Void> prewarm(String cwd, String model, String permissionMode) {
@@ -897,14 +930,14 @@ public abstract class BaseSDKBridge {
         msg = buildPrewarmMessage(
             cwd != null ? cwd : System.getProperty("user.dir"),
             model != null ? model : getDefaultModel(),
-            permissionMode != null ? permissionMode : "bypassPermissions"
+            permissionMode != null ? permissionMode : "default"
         );
 
         try {
             writeMessage(msg);
-            LOG.info(getProviderName() + " SDK prewarm 命令已发送");
+            log().info(getProviderName() + " SDK prewarm 命令已发送");
         } catch (Exception e) {
-            LOG.warn("发送 prewarm 命令失败: " + e.getMessage());
+            log().warn("发送 prewarm 命令失败: " + e.getMessage());
             activeSessions.remove("__prewarm__");
             future.completeExceptionally(e);
         }
@@ -930,7 +963,7 @@ public abstract class BaseSDKBridge {
             }
         }
 
-        LOG.info("Node.js 进程已退出，退出码: " + exitCode);
+        log().info("Node.js 进程已退出，退出码: " + exitCode);
 
         if (!shutdownRequested.get()) {
             invokeJsCallback("addErrorMessage",
@@ -983,10 +1016,10 @@ public abstract class BaseSDKBridge {
             if (!output.isEmpty() && Files.isDirectory(Path.of(output))) {
                 if (nodePaths.length() > 0) nodePaths.append(File.pathSeparator);
                 nodePaths.append(output);
-                LOG.info("全局 npm node_modules: " + output);
+                log().info("全局 npm node_modules: " + output);
             }
         } catch (Exception e) {
-            LOG.debug("无法获取全局 npm root: " + e.getMessage());
+            log().debug("无法获取全局 npm root: " + e.getMessage());
         }
 
         // 2. 检查 webview/node_modules（开发环境）
@@ -1005,13 +1038,13 @@ public abstract class BaseSDKBridge {
                     if (Files.isDirectory(webviewModules)) {
                         if (nodePaths.length() > 0) nodePaths.append(File.pathSeparator);
                         nodePaths.append(webviewModules.toAbsolutePath().toString());
-                        LOG.info("找到 webview/node_modules: " + webviewModules);
+                        log().info("找到 webview/node_modules: " + webviewModules);
                         break;
                     }
                 }
             }
         } catch (Exception e) {
-            LOG.debug("查找 webview/node_modules 失败: " + e.getMessage());
+            log().debug("查找 webview/node_modules 失败: " + e.getMessage());
         }
 
         // 3. 常见 macOS/Linux 全局路径
@@ -1066,7 +1099,7 @@ public abstract class BaseSDKBridge {
         try {
             cb.callJavaScript(functionName, args);
         } catch (Exception e) {
-            LOG.warn("调用 JS 回调 '" + functionName + "' 失败: " + e.getMessage());
+            log().warn("调用 JS 回调 '" + functionName + "' 失败: " + e.getMessage());
         }
     }
 

@@ -167,6 +167,22 @@ describe('useMessageSender - /context command', () => {
     expect(payload.reasoningEffort).toBe('high');
   });
 
+  it('sends default permission mode for a plain Claude message by default', () => {
+    const opts = createOptions({
+      permissionMode: 'default',
+      currentProvider: 'claude',
+    });
+
+    const { result } = renderHook(() => useMessageSender(opts));
+
+    act(() => {
+      result.current.handleSubmit('hello');
+    });
+
+    const payload = getBridgePayload('send_message');
+    expect(payload.permissionMode).toBe('default');
+  });
+
   it('includes explicit Claude high reasoning effort in attachment message payload', () => {
     const opts = createOptions({
       currentProvider: 'claude',

@@ -91,7 +91,7 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
       let restoredProvider = 'claude';
       let restoredClaudeModel = CLAUDE_MODELS[0].id;
       let restoredCodexModel = CODEX_MODELS[0].id;
-      let restoredClaudePermissionMode: PermissionMode = 'bypassPermissions';
+      let restoredClaudePermissionMode: PermissionMode = 'default';
       let restoredCodexPermissionMode: PermissionMode = 'default';
       let restoredLongContextEnabled = true;
       let restoredCodexFastMode: CodexFastMode = 'normal';

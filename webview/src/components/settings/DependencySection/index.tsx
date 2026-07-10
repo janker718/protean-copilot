@@ -283,7 +283,10 @@ const DependencySection = ({ addToast, isActive }: DependencySectionProps) => {
         } else if (result.error === 'node_not_configured') {
           addToastRef.current?.(tRef.current('settings.dependency.nodeNotConfigured'), 'warning');
         } else {
-          addToastRef.current?.(tRef.current('settings.dependency.installFailed', { error: result.error }), 'error');
+          addToastRef.current?.(
+            tRef.current('settings.dependency.installFailed', { error: result.message ?? result.error ?? 'Unknown error' }),
+            'error',
+          );
         }
       } catch (error) {
         console.error('[DependencySection] Failed to parse install result:', error);
@@ -319,7 +322,10 @@ const DependencySection = ({ addToast, isActive }: DependencySectionProps) => {
           }));
           sendToJava(`get_dependency_versions:${JSON.stringify({ id: result.sdkId })}`);
         } else {
-          addToastRef.current?.(tRef.current('settings.dependency.uninstallFailed', { error: result.error }), 'error');
+          addToastRef.current?.(
+            tRef.current('settings.dependency.uninstallFailed', { error: result.message ?? result.error ?? 'Unknown error' }),
+            'error',
+          );
         }
       } catch (error) {
         console.error('[DependencySection] Failed to parse uninstall result:', error);

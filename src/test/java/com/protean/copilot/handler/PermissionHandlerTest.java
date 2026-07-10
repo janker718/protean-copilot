@@ -8,8 +8,10 @@ import org.junit.Test;
 import java.util.ArrayList;
 import java.util.List;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -125,6 +127,54 @@ public class PermissionHandlerTest {
         assertTrue(task.cancelled);
     }
 
+    @Test
+    public void askUserQuestionResponseCompletesAndRemovesPendingRequest() throws Exception {
+        PermissionHandler handler = new PermissionHandler(createContext());
+        CompletableFuture<JsonObject> future = new CompletableFuture<>();
+        getAskUserMap(handler).put("ask-1", future);
+
+        invokePrivate(handler, "handleAskUserQuestionResponse",
+            "{\"requestId\":\"ask-1\",\"answers\":{\"mode\":\"plan\"}}"
+        );
+
+        JsonObject result = future.join();
+        assertEquals("plan", result.get("mode").getAsString());
+        assertTrue(getAskUserMap(handler).isEmpty());
+    }
+
+    @Test
+    public void planApprovalResponseCompletesAndRemovesPendingRequest() throws Exception {
+        PermissionHandler handler = new PermissionHandler(createContext());
+        CompletableFuture<JsonObject> future = new CompletableFuture<>();
+        getPlanApprovalMap(handler).put("plan-1", future);
+
+        invokePrivate(handler, "handlePlanApprovalResponse",
+            "{\"requestId\":\"plan-1\",\"approved\":true,\"targetMode\":\"acceptEdits\"}"
+        );
+
+        JsonObject result = future.join();
+        assertTrue(result.get("approved").getAsBoolean());
+        assertEquals("acceptEdits", result.get("targetMode").getAsString());
+        assertTrue(getPlanApprovalMap(handler).isEmpty());
+    }
+
+    @Test
+    public void deniedPermissionDecisionTriggersDeniedCallback() throws Exception {
+        PermissionHandler handler = new PermissionHandler(createContext());
+        AtomicBoolean denied = new AtomicBoolean(false);
+        handler.setPermissionDeniedCallback(() -> denied.set(true));
+
+        CompletableFuture<Integer> future = new CompletableFuture<>();
+        getPermissionMap(handler).put("perm-1", future);
+
+        invokePrivate(handler, "handlePermissionDecision",
+            "{\"channelId\":\"perm-1\",\"allow\":false,\"remember\":false}"
+        );
+
+        assertEquals(PermissionService.PermissionResponse.DENY.getValue(), future.join().intValue());
+        assertTrue(denied.get());
+    }
+
     private static HandlerContext createContext() {
         return new HandlerContext(null, null, null, new HandlerContext.JsCallback() {
             @Override
@@ -136,6 +186,12 @@ public class PermissionHandlerTest {
                 return str;
             }
         });
+    }
+
+    private static void invokePrivate(PermissionHandler handler, String methodName, String jsonContent) throws Exception {
+        Method method = PermissionHandler.class.getDeclaredMethod(methodName, String.class);
+        method.setAccessible(true);
+        method.invoke(handler, jsonContent);
     }
 
     @SuppressWarnings("unchecked")

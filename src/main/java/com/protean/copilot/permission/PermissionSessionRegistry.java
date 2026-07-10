@@ -66,15 +66,19 @@ final class PermissionSessionRegistry {
         if (project == null) {
             return null;
         }
+        PermissionService newestMatch = null;
+        long newestActivityTime = Long.MIN_VALUE;
         for (PermissionService service : INSTANCES_BY_SESSION_ID.values()) {
-            if (service.getProject() == project) {
-                return service;
+            if (service.getProject() == project && service.getLastActivityTime() >= newestActivityTime) {
+                newestMatch = service;
+                newestActivityTime = service.getLastActivityTime();
             }
         }
-        if (legacyInstance != null && legacyInstance.getProject() == project) {
-            return legacyInstance;
+        if (legacyInstance != null && legacyInstance.getProject() == project
+            && legacyInstance.getLastActivityTime() >= newestActivityTime) {
+            newestMatch = legacyInstance;
         }
-        return null;
+        return newestMatch;
     }
 
     private static synchronized void cleanupStaleInstancesIfNeeded() {

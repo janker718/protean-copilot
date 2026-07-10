@@ -16,6 +16,26 @@ public final class SessionRuntimeMessages {
             + " runtime unavailable. Check Node.js and the installed SDK dependency, then retry.";
     }
 
+    public static String codexRuntimeAccessUnavailable() {
+        return "Codex local configuration access is not authorized. Please authorize local ~/.codex access or enable a managed Codex provider first.";
+    }
+
+    public static String dependencyNodeNotConfigured() {
+        return "Node.js is not configured. Please set the Node.js path in Basic Settings first.";
+    }
+
+    public static String dependencyStatusUnavailable(@Nullable Throwable throwable) {
+        return "Dependency status unavailable. " + sanitizeDetail(rootMessage(throwable));
+    }
+
+    public static String dependencyInstallFailed(@Nullable String subject, @Nullable String detail) {
+        return dependencyOperationFailed(subject, "installation", detail);
+    }
+
+    public static String dependencyUninstallFailed(@Nullable String subject, @Nullable String detail) {
+        return dependencyOperationFailed(subject, "uninstall", detail);
+    }
+
     public static String requestFailed(@Nullable String provider, @Nullable Throwable throwable) {
         return classify(displayProvider(provider), null, rootMessage(throwable), "query", null);
     }
@@ -124,6 +144,22 @@ public final class SessionRuntimeMessages {
             builder.append(" (").append(normalizedPhase).append(')');
         }
         return appendHint(builder.toString(), hint);
+    }
+
+    private static String dependencyOperationFailed(
+        @Nullable String subject,
+        String operation,
+        @Nullable String detail
+    ) {
+        String label = displayProvider(subject);
+        String normalizedDetail = sanitizeDetail(detail);
+        if (isPermissionDenied("", normalizedDetail)) {
+            return label + " permission request was denied. " + normalizedDetail;
+        }
+        if (isSandboxDenied("", normalizedDetail)) {
+            return label + " sandbox denied the requested operation. " + normalizedDetail;
+        }
+        return label + " " + operation + " failed. " + normalizedDetail;
     }
 
     private static String appendHint(String base, @Nullable String hint) {

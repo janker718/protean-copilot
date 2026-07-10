@@ -37,10 +37,10 @@ public class SettingsService {
 
     /**
      * 获取当前的权限模式设置。
-     * @return 权限模式，默认 {@code "bypassPermissions"}
+     * @return 权限模式，默认 {@code "default"}
      */
     public String getPermissionMode() {
-        return props.getValue(KEY_PERMISSION_MODE, "bypassPermissions");
+        return props.getValue(KEY_PERMISSION_MODE, "default");
     }
 
     public void setPermissionMode(String mode) {

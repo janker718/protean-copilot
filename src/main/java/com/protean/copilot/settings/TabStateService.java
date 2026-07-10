@@ -56,7 +56,7 @@ public final class TabStateService implements PersistentStateComponent<TabStateS
         String reasoningEffort
     ) {
         public TabSessionState() {
-            this("claude", null, null, "default", "bypassPermissions", null);
+            this("claude", null, null, "default", "default", null);
         }
     }
 

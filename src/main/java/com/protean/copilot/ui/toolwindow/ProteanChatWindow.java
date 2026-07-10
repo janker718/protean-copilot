@@ -25,6 +25,7 @@ import com.intellij.ui.jcef.JBCefBrowser;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -597,6 +598,14 @@ public class ProteanChatWindow {
         return sdkBridge;
     }
 
+    public ClaudeSDKBridge getClaudeSDKBridge() {
+        return sdkBridge.getClaudeBridge();
+    }
+
+    public CodexSDKBridge getCodexSDKBridge() {
+        return sdkBridge.getCodexBridge();
+    }
+
     public Project getProject() {
         return project;
     }
@@ -681,6 +690,11 @@ public class ProteanChatWindow {
 
     public static ProteanChatWindow getChatWindow(Project project) {
         return project != null ? WINDOWS_BY_PROJECT.get(project) : null;
+    }
+
+    public static List<ProteanChatWindow> getAllChatWindowsForProject(Project project) {
+        ProteanChatWindow window = getChatWindow(project);
+        return window == null ? List.of() : List.of(window);
     }
 
     public void focusInputPane() {

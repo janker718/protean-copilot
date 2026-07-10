@@ -374,9 +374,25 @@ describe('DependencySection', () => {
         sdkId: 'codex-sdk',
         requestedVersion: '0.143.0',
         error: 'npm install failed',
+        message: 'Codex SDK installation failed. npm install failed.',
       }));
     });
 
-    expect(addToast).toHaveBeenCalledWith('安装失败: npm install failed', 'error');
+    expect(addToast).toHaveBeenCalledWith('安装失败: Codex SDK installation failed. npm install failed.', 'error');
+  });
+
+  it('shows a warning toast when backend reports node_not_configured during install', () => {
+    const addToast = vi.fn();
+    render(<DependencySection isActive={false} addToast={addToast} />);
+
+    act(() => {
+      window.dependencyInstallResult?.(JSON.stringify({
+        success: false,
+        sdkId: 'codex-sdk',
+        error: 'node_not_configured',
+      }));
+    });
+
+    expect(addToast).toHaveBeenCalledWith('Node.js 未配置', 'warning');
   });
 });
