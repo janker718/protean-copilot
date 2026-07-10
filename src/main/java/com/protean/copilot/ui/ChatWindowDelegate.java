@@ -6,9 +6,12 @@ import com.protean.copilot.handler.core.MessageDispatcher;
 import com.protean.copilot.handler.core.MessageHandler;
 import com.protean.copilot.handler.diff.DiffHandler;
 import com.protean.copilot.handler.DependencyHandler;
+import com.protean.copilot.handler.FrontendActionCoverageHandler;
 import com.protean.copilot.handler.HistoryHandler;
 import com.protean.copilot.handler.PermissionHandler;
 import com.protean.copilot.handler.SettingsHandler;
+import com.protean.copilot.handler.WindowEventHandler;
+import com.protean.copilot.handler.provider.ProviderHandler;
 import com.protean.copilot.permission.PermissionService;
 import com.protean.copilot.session.ChatSession;
 import com.protean.copilot.session.SessionLifecycleManager;
@@ -136,7 +139,15 @@ public class ChatWindowDelegate {
         historyHandler = histHandler;
         dispatcher.registerHandler(histHandler);
         dispatcher.registerHandler(new SettingsHandler(context));
+        dispatcher.registerHandler(new ProviderHandler(context));
         dispatcher.registerHandler(new DependencyHandler(context));
+        dispatcher.registerHandler(new WindowEventHandler(
+            context,
+            host::updateTabLoadingState,
+            this::onTabStatusChanged,
+            host.getSessionLifecycleManager()::createNewSession
+        ));
+        dispatcher.registerHandler(new FrontendActionCoverageHandler(context));
 
         // 为用户消息注册处理器 —— 通过 session/provider 通用层转发到对应 SDK bridge
         dispatcher.registerHandler(new MessageHandler() {
@@ -350,6 +361,15 @@ public class ChatWindowDelegate {
         } catch (Exception e) {
             LOG.warn("Failed to update tab status: " + e.getMessage());
         }
+    }
+
+    private void onTabStatusChanged(String status) {
+        TabAnswerStatus resolved = switch (status == null ? "" : status.toLowerCase(Locale.ROOT)) {
+            case "answering", "loading", "streaming" -> TabAnswerStatus.ANSWERING;
+            case "completed", "complete", "done" -> TabAnswerStatus.COMPLETED;
+            default -> TabAnswerStatus.IDLE;
+        };
+        updateTabStatus(resolved);
     }
 
     /**

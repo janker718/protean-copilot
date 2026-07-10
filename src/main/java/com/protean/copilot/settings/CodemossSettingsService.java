@@ -46,6 +46,9 @@ public class CodemossSettingsService {
     private static final String KEY_AUTO_OPEN_FILE = "autoOpenFile";
     private static final String KEY_AGENTS = "agents";
     private static final String KEY_SELECTED_AGENT_ID = "selectedAgentId";
+    private static final String KEY_GLOBAL_PROMPTS = "globalPrompts";
+    private static final String KEY_PROJECT_PROMPTS = "projectPrompts";
+    private static final String KEY_THINKING_ENABLED = "thinkingEnabled";
     private static final String KEY_COMMIT_PROMPT = "commitPrompt";
     private static final String KEY_PROJECT_COMMIT_PROMPT = "projectCommitPrompt";
     private static final String KEY_STATUS_BAR_WIDGET_ENABLED = "statusBarWidgetEnabled";
@@ -65,6 +68,9 @@ public class CodemossSettingsService {
     private static final String KEY_COMMIT_AI_CONFIG = "commitAiConfig";
     private static final String KEY_PROMPT_ENHANCER_CONFIG = "promptEnhancerConfig";
     private static final String KEY_CODEX = "codex";
+    private static final String KEY_CLAUDE = "claude";
+    private static final String KEY_CURRENT = "current";
+    private static final String KEY_PROVIDERS = "providers";
     private static final String KEY_CODEX_CURRENT = "current";
     private static final String KEY_CODEX_PROVIDERS = "providers";
     private static final String KEY_CODEX_LOCAL_CONFIG_AUTHORIZED = "localConfigAuthorized";
@@ -74,6 +80,10 @@ public class CodemossSettingsService {
     private static final String DEFAULT_CONFIG_FILE_NAME = "config.json";
     private static final String DEFAULT_BACKUP_FILE_NAME = "config.json.bak";
     private static final String DEFAULT_CODEX_CLI_LOGIN_PROVIDER_ID = "codex-cli-login";
+    private static final String CLAUDE_LOCAL_SETTINGS_PROVIDER_ID = "__local_settings_json__";
+    private static final String CLAUDE_CLI_LOGIN_PROVIDER_ID = "__cli_login__";
+    private static final String DISABLED_PROVIDER_ID = "__disabled__";
+    private static final String CODEX_CLI_LOGIN_PROVIDER_ID = "__codex_cli_login__";
     public static final int DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS =
         PermissionDialogTimeoutSettings.DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS;
     public static final long PERMISSION_SAFETY_NET_BUFFER_SECONDS =
@@ -81,10 +91,24 @@ public class CodemossSettingsService {
 
     private final Gson gson;
     private final SettingsService settingsService;
+    private final Path configDirectoryPath;
 
     public CodemossSettingsService() {
+        this(Paths.get(System.getProperty("user.home"), DEFAULT_CONFIG_DIR_NAME), new SettingsService());
+    }
+
+    /**
+     * Creates a service backed by an explicit directory. This is useful for
+     * isolated integrations and tests that must not touch the user's config.
+     */
+    public CodemossSettingsService(Path configDirectoryPath) {
+        this(configDirectoryPath, null);
+    }
+
+    private CodemossSettingsService(Path configDirectoryPath, @Nullable SettingsService settingsService) {
         this.gson = new GsonBuilder().setPrettyPrinting().serializeNulls().create();
-        this.settingsService = new SettingsService();
+        this.settingsService = settingsService;
+        this.configDirectoryPath = configDirectoryPath;
     }
 
     // ==================== Basic Config Management ====================
@@ -382,6 +406,30 @@ public class CodemossSettingsService {
         writeConfig(config);
     }
 
+    public List<JsonObject> getPrompts(boolean projectScope) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject prompts = ensureObject(config, projectScope ? KEY_PROJECT_PROMPTS : KEY_GLOBAL_PROMPTS);
+        List<JsonObject> result = new ArrayList<>();
+        for (String id : prompts.keySet()) {
+            if (prompts.get(id).isJsonObject()) {
+                JsonObject prompt = prompts.getAsJsonObject(id).deepCopy();
+                if (!prompt.has("id")) {
+                    prompt.addProperty("id", id);
+                }
+                result.add(prompt);
+            }
+        }
+        return result;
+    }
+
+    public boolean isThinkingEnabled() throws IOException {
+        return readBooleanFlag(KEY_THINKING_ENABLED, false);
+    }
+
+    public void setThinkingEnabled(boolean enabled) throws IOException {
+        writeBooleanFlag(KEY_THINKING_ENABLED, enabled);
+    }
+
     // ==================== Basic Flags ====================
 
     public boolean getStatusBarWidgetEnabled() throws IOException {
@@ -622,10 +670,107 @@ public class CodemossSettingsService {
         return result;
     }
 
+    public JsonObject getCurrentCodexConfig() throws IOException {
+        JsonObject config = readConfig();
+        return ensureObject(config, KEY_CODEX).deepCopy();
+    }
+
+    // ==================== Provider Config Management ====================
+
+    public List<JsonObject> getClaudeProviders() throws IOException {
+        JsonObject config = readConfig();
+        JsonObject claude = ensureObject(config, KEY_CLAUDE);
+        String currentId = getNullableString(claude, KEY_CURRENT);
+        List<JsonObject> providers = listProviders(ensureObject(claude, KEY_PROVIDERS), currentId);
+        providers.add(virtualProvider(CLAUDE_LOCAL_SETTINGS_PROVIDER_ID, "Local settings.json", CLAUDE_LOCAL_SETTINGS_PROVIDER_ID.equals(currentId)));
+        providers.add(virtualProvider(CLAUDE_CLI_LOGIN_PROVIDER_ID, "Claude CLI login", CLAUDE_CLI_LOGIN_PROVIDER_ID.equals(currentId)));
+        return providers;
+    }
+
+    public void addClaudeProvider(JsonObject provider) throws IOException {
+        addProvider(KEY_CLAUDE, provider);
+    }
+
+    public void updateClaudeProvider(String id, JsonObject updates) throws IOException {
+        updateProvider(KEY_CLAUDE, id, updates);
+    }
+
+    public void deleteClaudeProvider(String id) throws IOException {
+        deleteProvider(KEY_CLAUDE, id);
+    }
+
+    public void switchClaudeProvider(String id) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject claude = ensureObject(config, KEY_CLAUDE);
+        String normalizedId = normalizeRequiredId(id);
+        if (DISABLED_PROVIDER_ID.equals(normalizedId)) {
+            claude.addProperty(KEY_CURRENT, "");
+        } else if (CLAUDE_LOCAL_SETTINGS_PROVIDER_ID.equals(normalizedId) || CLAUDE_CLI_LOGIN_PROVIDER_ID.equals(normalizedId)) {
+            claude.addProperty(KEY_CURRENT, normalizedId);
+        } else {
+            requireProvider(ensureObject(claude, KEY_PROVIDERS), normalizedId);
+            claude.addProperty(KEY_CURRENT, normalizedId);
+        }
+        writeConfig(config);
+    }
+
+    public void saveClaudeProviderOrder(List<String> orderedIds) throws IOException {
+        saveProviderOrder(KEY_CLAUDE, orderedIds);
+    }
+
+    public List<JsonObject> getCodexProviders() throws IOException {
+        JsonObject config = readConfig();
+        JsonObject codex = ensureObject(config, KEY_CODEX);
+        String currentId = getNullableString(codex, KEY_CODEX_CURRENT);
+        List<JsonObject> providers = listProviders(ensureObject(codex, KEY_CODEX_PROVIDERS), currentId);
+        providers.add(virtualProvider(CODEX_CLI_LOGIN_PROVIDER_ID, "Codex CLI login", DEFAULT_CODEX_CLI_LOGIN_PROVIDER_ID.equals(currentId)));
+        return providers;
+    }
+
+    public void addCodexProvider(JsonObject provider) throws IOException {
+        addProvider(KEY_CODEX, provider);
+    }
+
+    public void updateCodexProvider(String id, JsonObject updates) throws IOException {
+        updateProvider(KEY_CODEX, id, updates);
+    }
+
+    public void deleteCodexProvider(String id) throws IOException {
+        deleteProvider(KEY_CODEX, id);
+    }
+
+    public void switchCodexProvider(String id) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject codex = ensureObject(config, KEY_CODEX);
+        String normalizedId = normalizeRequiredId(id);
+        if (CODEX_CLI_LOGIN_PROVIDER_ID.equals(normalizedId)) {
+            codex.addProperty(KEY_CODEX_CURRENT, DEFAULT_CODEX_CLI_LOGIN_PROVIDER_ID);
+            codex.addProperty(KEY_CODEX_LOCAL_CONFIG_AUTHORIZED, true);
+        } else if (DISABLED_PROVIDER_ID.equals(normalizedId)) {
+            codex.addProperty(KEY_CODEX_CURRENT, "");
+        } else {
+            requireProvider(ensureObject(codex, KEY_CODEX_PROVIDERS), normalizedId);
+            codex.addProperty(KEY_CODEX_CURRENT, normalizedId);
+        }
+        writeConfig(config);
+    }
+
+    public void saveCodexProviderOrder(List<String> orderedIds) throws IOException {
+        saveProviderOrder(KEY_CODEX, orderedIds);
+    }
+
+    public JsonObject getActiveClaudeProvider() throws IOException {
+        return getActiveProvider(KEY_CLAUDE, false);
+    }
+
+    public JsonObject getActiveCodexProvider() throws IOException {
+        return getActiveProvider(KEY_CODEX, true);
+    }
+
     // ==================== Helpers ====================
 
     private Path getConfigDirectoryPath() {
-        return Paths.get(System.getProperty("user.home"), DEFAULT_CONFIG_DIR_NAME);
+        return configDirectoryPath;
     }
 
     private Path getConfigFilePath() {
@@ -656,9 +801,9 @@ public class CodemossSettingsService {
         config.addProperty("version", CONFIG_VERSION);
 
         JsonObject claude = new JsonObject();
-        claude.addProperty("current", "");
-        claude.add("providers", new JsonObject());
-        config.add("claude", claude);
+        claude.addProperty(KEY_CURRENT, "");
+        claude.add(KEY_PROVIDERS, new JsonObject());
+        config.add(KEY_CLAUDE, claude);
 
         JsonObject codex = new JsonObject();
         codex.addProperty(KEY_CODEX_CURRENT, "");
@@ -667,6 +812,9 @@ public class CodemossSettingsService {
         config.add(KEY_CODEX, codex);
 
         config.add(KEY_AGENTS, new JsonObject());
+        config.add(KEY_GLOBAL_PROMPTS, new JsonObject());
+        config.add(KEY_PROJECT_PROMPTS, new JsonObject());
+        config.addProperty(KEY_THINKING_ENABLED, false);
         return config;
     }
 
@@ -674,7 +822,11 @@ public class CodemossSettingsService {
         if (!config.has("version")) {
             config.addProperty("version", CONFIG_VERSION);
         }
-        ensureObject(config, "claude");
+        JsonObject claude = ensureObject(config, KEY_CLAUDE);
+        if (!claude.has(KEY_CURRENT)) {
+            claude.addProperty(KEY_CURRENT, "");
+        }
+        ensureObject(claude, KEY_PROVIDERS);
         JsonObject codex = ensureObject(config, KEY_CODEX);
         if (!codex.has(KEY_CODEX_CURRENT)) {
             codex.addProperty(KEY_CODEX_CURRENT, "");
@@ -684,6 +836,11 @@ public class CodemossSettingsService {
             codex.addProperty(KEY_CODEX_LOCAL_CONFIG_AUTHORIZED, false);
         }
         ensureObject(config, KEY_AGENTS);
+        ensureObject(config, KEY_GLOBAL_PROMPTS);
+        ensureObject(config, KEY_PROJECT_PROMPTS);
+        if (!config.has(KEY_THINKING_ENABLED)) {
+            config.addProperty(KEY_THINKING_ENABLED, false);
+        }
     }
 
     private JsonObject ensureObject(JsonObject parent, String key) {
@@ -693,6 +850,127 @@ public class CodemossSettingsService {
             return object;
         }
         return parent.getAsJsonObject(key);
+    }
+
+    private void addProvider(String providerSection, JsonObject provider) throws IOException {
+        String id = normalizeRequiredId(getNullableString(provider, "id"));
+        JsonObject config = readConfig();
+        JsonObject providers = providersFor(config, providerSection);
+        if (providers.has(id)) {
+            throw new IllegalArgumentException("Provider already exists: " + id);
+        }
+        JsonObject stored = provider.deepCopy();
+        stored.addProperty("id", id);
+        providers.add(id, stored);
+        writeConfig(config);
+    }
+
+    private void updateProvider(String providerSection, String id, JsonObject updates) throws IOException {
+        String normalizedId = normalizeRequiredId(id);
+        JsonObject config = readConfig();
+        JsonObject provider = requireProvider(providersFor(config, providerSection), normalizedId);
+        if (updates != null) {
+            for (Map.Entry<String, com.google.gson.JsonElement> entry : updates.entrySet()) {
+                if (!"id".equals(entry.getKey())) {
+                    provider.add(entry.getKey(), entry.getValue().deepCopy());
+                }
+            }
+        }
+        provider.addProperty("id", normalizedId);
+        writeConfig(config);
+    }
+
+    private void deleteProvider(String providerSection, String id) throws IOException {
+        String normalizedId = normalizeRequiredId(id);
+        JsonObject config = readConfig();
+        JsonObject section = ensureObject(config, providerSection);
+        JsonObject providers = ensureObject(section, KEY_PROVIDERS);
+        providers.remove(normalizedId);
+        if (normalizedId.equals(getNullableString(section, KEY_CURRENT))) {
+            section.addProperty(KEY_CURRENT, "");
+        }
+        writeConfig(config);
+    }
+
+    private void saveProviderOrder(String providerSection, List<String> orderedIds) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject providers = providersFor(config, providerSection);
+        JsonObject reordered = new JsonObject();
+        if (orderedIds != null) {
+            for (String id : orderedIds) {
+                if (id != null && providers.has(id)) {
+                    reordered.add(id, providers.get(id));
+                }
+            }
+        }
+        for (Map.Entry<String, com.google.gson.JsonElement> entry : providers.entrySet()) {
+            if (!reordered.has(entry.getKey())) {
+                reordered.add(entry.getKey(), entry.getValue());
+            }
+        }
+        ensureObject(config, providerSection).add(KEY_PROVIDERS, reordered);
+        writeConfig(config);
+    }
+
+    private JsonObject getActiveProvider(String providerSection, boolean codex) throws IOException {
+        JsonObject config = readConfig();
+        JsonObject section = ensureObject(config, providerSection);
+        String currentId = getNullableString(section, KEY_CURRENT);
+        if (codex && DEFAULT_CODEX_CLI_LOGIN_PROVIDER_ID.equals(currentId)) {
+            return virtualProvider(CODEX_CLI_LOGIN_PROVIDER_ID, "Codex CLI login", true);
+        }
+        if (!codex && (CLAUDE_LOCAL_SETTINGS_PROVIDER_ID.equals(currentId) || CLAUDE_CLI_LOGIN_PROVIDER_ID.equals(currentId))) {
+            return virtualProvider(currentId, currentId.equals(CLAUDE_LOCAL_SETTINGS_PROVIDER_ID) ? "Local settings.json" : "Claude CLI login", true);
+        }
+        JsonObject providers = ensureObject(section, KEY_PROVIDERS);
+        return currentId != null && providers.has(currentId)
+            ? withActiveFlag(providers.getAsJsonObject(currentId), true)
+            : new JsonObject();
+    }
+
+    private JsonObject providersFor(JsonObject config, String providerSection) {
+        return ensureObject(ensureObject(config, providerSection), KEY_PROVIDERS);
+    }
+
+    private JsonObject requireProvider(JsonObject providers, String id) {
+        if (!providers.has(id) || !providers.get(id).isJsonObject()) {
+            throw new IllegalArgumentException("Unknown provider: " + id);
+        }
+        return providers.getAsJsonObject(id);
+    }
+
+    private List<JsonObject> listProviders(JsonObject providers, String currentId) {
+        List<JsonObject> result = new ArrayList<>();
+        for (Map.Entry<String, com.google.gson.JsonElement> entry : providers.entrySet()) {
+            if (entry.getValue().isJsonObject()) {
+                JsonObject provider = entry.getValue().getAsJsonObject();
+                provider.addProperty("id", entry.getKey());
+                result.add(withActiveFlag(provider, entry.getKey().equals(currentId)));
+            }
+        }
+        return result;
+    }
+
+    private JsonObject virtualProvider(String id, String name, boolean active) {
+        JsonObject provider = new JsonObject();
+        provider.addProperty("id", id);
+        provider.addProperty("name", name);
+        provider.addProperty("isActive", active);
+        provider.addProperty("isLocalProvider", true);
+        return provider;
+    }
+
+    private JsonObject withActiveFlag(JsonObject provider, boolean active) {
+        JsonObject result = provider.deepCopy();
+        result.addProperty("isActive", active);
+        return result;
+    }
+
+    private String normalizeRequiredId(String id) {
+        if (id == null || id.isBlank()) {
+            throw new IllegalArgumentException("Provider id is required");
+        }
+        return id.trim();
     }
 
     private JsonObject readSoundConfig() throws IOException {

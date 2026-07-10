@@ -587,6 +587,14 @@ if (typeof window !== 'undefined' && !window.updateDependencyStatus) {
   };
 }
 
+// Preserve the selected-agent response when Java answers before React has
+// registered its callback group.
+if (typeof window !== 'undefined' && !window.updateSelectedAgent) {
+  window.updateSelectedAgent = (json: string) => {
+    window.__pendingSelectedAgent = json;
+  };
+}
+
 // Pre-register dependencyUpdateAvailable to handle backend update checks that arrive before Settings/React initializes
 if (typeof window !== 'undefined' && !window.dependencyUpdateAvailable) {
   debugLog('[Main] Pre-registering dependencyUpdateAvailable placeholder');

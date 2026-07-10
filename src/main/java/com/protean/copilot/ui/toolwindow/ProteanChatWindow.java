@@ -729,7 +729,7 @@ public class ProteanChatWindow {
                 }
 
                 switch (type) {
-                    case "__frontend_ready__" -> {
+                    case "__frontend_ready__", "frontend_ready" -> {
                         frontendReady = true;
                         flushPendingCodeSnippet();
                         return;
@@ -753,6 +753,11 @@ public class ProteanChatWindow {
                 String value = trimmed.substring(colonIndex + 1).trim();
 
                 switch (key) {
+                    case "__frontend_ready__", "frontend_ready" -> {
+                        frontendReady = true;
+                        flushPendingCodeSnippet();
+                        return;
+                    }
                     case "heartbeat" -> {
                         webviewWatchdog.handleHeartbeat(value);
                         return;

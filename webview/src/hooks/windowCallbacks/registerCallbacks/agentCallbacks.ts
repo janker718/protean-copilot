@@ -3,7 +3,7 @@
  *
  * Registers window bridge callbacks for agent management and selection context:
  * addSelectionInfo, addCodeSnippet, clearSelectionInfo,
- * onSelectedAgentReceived, onSelectedAgentChanged.
+ * updateSelectedAgent, onSelectedAgentReceived, onSelectedAgentChanged.
  */
 
 import type { UseWindowCallbacksOptions } from '../../useWindowCallbacks';
@@ -42,7 +42,7 @@ export function registerAgentAndSelectionCallbacks(options: UseWindowCallbacksOp
     setContextInfo(null);
   };
 
-  window.onSelectedAgentReceived = (json) => {
+  const applySelectedAgent = (json: string) => {
     try {
       if (!json || json === 'null' || json === '{}') {
         setSelectedAgent(null);
@@ -72,6 +72,17 @@ export function registerAgentAndSelectionCallbacks(options: UseWindowCallbacksOp
       setSelectedAgent(null);
     }
   };
+
+  // updateSelectedAgent is the current Java bridge callback. Keep the former
+  // name as an alias because older bridge implementations can still emit it.
+  window.updateSelectedAgent = applySelectedAgent;
+  window.onSelectedAgentReceived = applySelectedAgent;
+
+  if (window.__pendingSelectedAgent !== undefined) {
+    const pending = window.__pendingSelectedAgent;
+    delete window.__pendingSelectedAgent;
+    applySelectedAgent(pending);
+  }
 
   window.onSelectedAgentChanged = (json) => {
     try {

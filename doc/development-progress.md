@@ -1,6 +1,6 @@
 # 开发进度快照
 
-更新时间：2026-07-10
+更新时间：2026-07-10（本轮复核）
 
 本文档基于两个仓库当前代码状态整理：
 
@@ -42,9 +42,10 @@
 
 | 维度 | ProteanCopilot | jetbrains-cc-gui |
 |---|---:|---:|
-| Java 主代码文件数 | 137 | 268 |
-| Java 测试文件数 | 14 | 87 |
-| WebView `ts/tsx` 文件数 | 401 | - |
+| Java 主代码文件数 | 138 | 268 |
+| Java 测试文件数 | 17 | 86 |
+| WebView `ts/tsx` 文件数 | 402 | - |
+| WebView 测试文件数 | 84 | - |
 | Node/bridge JS 文件数 | 2 个 bridge resource | 77 个 ai-bridge JS/CJS/MJS |
 | Claude provider | 已接主链 | 完整 |
 | Codex provider | 首轮 bridge 已接通，依赖/稳定化补齐中 | 完整 |
@@ -65,6 +66,13 @@
 - `./gradlew runIde` 已成功返回，可确认当前插件沙箱可启动
 - `cd webview && npx vitest run src/hooks/useWindowCallbacks.test.ts src/hooks/providers/useUsageTracking.test.ts` 已通过
 - `./gradlew compileJava` 已通过
+
+本轮额外确认：
+
+- Settings 的 SDK 状态回调不再把 JSON 二次转义；`DependencyHandler` 直接向 WebView 传递 JSON 对象。
+- `DependencySection` 会消费页面初始化前积压的状态、版本与更新事件，并为状态和版本查询提供 `5s` / `8s` 超时兜底。
+- `cd webview && npx vitest run src/components/settings/DependencySection/index.test.tsx` 最近一次已通过（8 个用例），覆盖积压事件与超时兜底。
+- 本地 IDE 曾选中指向 `doc/` 的临时 Gradle 配置，导致尝试执行不存在的 `/gradlew`；该工作区配置已改回共享的项目根 `.run/Run IDE with Plugin` 配置。此项是本机运行入口排障，不属于共享源码功能变更。
 
 但需要明确区分：
 
@@ -411,14 +419,14 @@ Claude provider 主链已具备：
 
 但总体测试规模与参考项目仍差距很大：
 
-- 当前 Java 测试 14 个
-- 参考项目 Java 测试 87 个
+- 当前 Java 测试 17 个
+- 参考项目 Java 测试 86 个
 
 最明显的缺口仍在：
 
 - Codex runtime bridge
 - dependency install / update / node environment
-- provider-specific message 处理
+- provider-specific message 处理。参考项目已拆出 `ClaudeMessageHandler` / `CodexMessageHandler`，当前仍主要由通用 orchestrator 承担。
 - session lifecycle 与窗口解耦回归
 - permission 与 provider 执行链联合回归
 
@@ -464,6 +472,7 @@ Claude provider 主链已具备：
 - 首页 `Checking SDK status` 卡死问题已修复，补齐了窗口层 `event:content` 分发缺口
 - 增补了 App 级 SDK 状态加载回归测试与超时兜底测试
 - `get_dependency_status` 这条 provider/dependency 启动链路已从“结构存在”推进到“有回归保护”
+- `@openai/codex-sdk` 的实际安装、精确版本锁定、`package-lock.json` 同步与环境说明已完成；剩余的是 IDE 内用户操作和真实凭据的手工验证，不是依赖后端实现缺失。
 
 原因：
 
@@ -499,7 +508,23 @@ Claude provider 主链已具备：
 - 当前 Codex history 已经能读，但仍偏轻
 - 应避免在 runtime 未通时先做大量深历史重构
 
-### 第四优先级：再扩 skill / MCP / prompt 后端闭环
+### 第四优先级：把 Node runtime 从单 bridge 资源演进为可维护分层
+
+参考项目的 `ai-bridge` 已拆分 channel、Claude/Codex service、SDK loader、permission mapper 等模块；当前项目只有 `claude-sdk-bridge.mjs` 与 `codex-sdk-bridge.mjs` 两个 bridge resource。
+
+需要在不改变现有 Java adapter/router/orchestrator 边界的前提下，逐步抽出：
+
+- provider event normalizer
+- provider-specific permission mapper
+- SDK loading / environment helper
+- bridge process 与错误恢复公共层
+
+原因：
+
+- 目前 bridge 已能运行，但继续把 provider 差异堆在单文件会放大 Codex 扩展和故障定位成本。
+- 这个工作应排在运行稳定化之后、产品功能扩展之前，避免为了加功能再次重构运行时。
+
+### 第五优先级：再扩 skill / MCP / prompt 后端闭环
 
 这部分仍应放在后面，原因很直接：
 
@@ -516,15 +541,15 @@ Claude provider 主链已具备：
 - Claude 主链已站稳
 - history / permission / session 的通用层已基本成形
 - Codex 已经从“结构层”推进到“首轮运行层”，但还没完成稳定化收口
-- dependency/backend 文档与入口已开始补齐，但还没完成真实安装与锁版闭环
+- dependency/backend 已完成真实安装、锁版、lockfile、环境说明和 Settings 数据链路的首轮闭环，但还没完成 IDE 内人工安装/卸载与真实凭据回归
 
 因此当前与参考项目的核心差异，不再是“有没有这些目录”，而是：
 
 1. Node runtime 体系差距仍大。
 2. Codex provider 已有真实 bridge，但事件归一化、分层厚度与稳定性验证仍不足。
-3. dependency 安装与运行环境说明已起步，但还没有完成真实锁版和回归闭环。
+3. 依赖后端已完成锁版和定向回归，但真实 IDE 操作、真实 thread 与恢复场景仍缺验证记录。
 4. session / permission 虽已拆层，但还未完全产品化。
-5. 测试覆盖密度仍明显不足。
+5. 测试覆盖密度仍明显不足，特别是 provider runtime、事件归一化和生命周期恢复。
 
 后续策略应继续坚持：
 

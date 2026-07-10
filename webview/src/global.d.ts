@@ -536,6 +536,11 @@ interface Window {
   updateAgents?: (json: string) => void;
 
   /**
+   * Selected agent returned by the Java bridge during initialization.
+   */
+  updateSelectedAgent?: (json: string) => void;
+
+  /**
    * Agent operation result callback
    */
   agentOperationResult?: (json: string) => void;
@@ -843,6 +848,9 @@ interface Window {
    * Pending dependency status payload before React initialization
    */
   __pendingDependencyStatus?: string;
+
+  /** Selected-agent payload received before React callback registration. */
+  __pendingSelectedAgent?: string;
 
   /**
    * Pending streaming enabled status before React initialization
