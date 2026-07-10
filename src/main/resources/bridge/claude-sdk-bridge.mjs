@@ -1,19 +1,22 @@
 #!/usr/bin/env node
 /**
  * Claude SDK Bridge — 运行在 Node.js 子进程中，充当 Java IntelliJ 插件
- * 与 @anthropic-ai/claude-code（或兼容的 Claude Code SDK）之间的适配层。
+ * 与 @anthropic-ai/claude-agent-sdk 之间的适配层。
  *
  * 协议：从 stdin 读取单行 JSON 消息，将单行 JSON 响应写入 stdout。
  * stderr 仅用于日志输出，Java 端会将其记录到日志中。
  *
  * 依赖：
- *   npm install @anthropic-ai/claude-code
+ *   npm install @anthropic-ai/claude-agent-sdk
  *
  * 用法：
  *   node claude-sdk-bridge.mjs
  */
 
 import * as readline from 'node:readline';
+import { createRequire } from 'node:module';
+import { delimiter, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 // ────────────────────────────────────────────────────────────────────────────
 // 全局状态
@@ -36,13 +39,42 @@ process.stdout.setDefaultEncoding('utf-8');
 
 let claudeSDK = null;
 let sdkVersion = 'unknown';
+let sdkImportError = null;
+const SDK_PACKAGE = '@anthropic-ai/claude-agent-sdk';
+
+async function loadClaudeSdk() {
+  const failures = [];
+  const configuredRoots = (process.env.PROTEAN_CLAUDE_SDK_NODE_MODULES || '')
+    .split(delimiter)
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  for (const nodeModulesRoot of configuredRoots) {
+    try {
+      // createRequire anchors package resolution at the managed SDK installation.
+      const resolver = createRequire(join(nodeModulesRoot, '.protean-claude-bridge.cjs'));
+      const entryPoint = resolver.resolve(SDK_PACKAGE);
+      return await import(pathToFileURL(entryPoint).href);
+    } catch (error) {
+      failures.push(`${nodeModulesRoot}: ${error.message}`);
+    }
+  }
+
+  try {
+    return await import(SDK_PACKAGE);
+  } catch (error) {
+    failures.push(`default resolution: ${error.message}`);
+    throw new Error(failures.join('; '));
+  }
+}
 
 try {
-  claudeSDK = await import('@anthropic-ai/claude-code');
+  claudeSDK = await loadClaudeSdk();
   sdkVersion = claudeSDK.default?.version || claudeSDK.version || 'unknown';
-} catch (e) {
-  // SDK 不可用时仍继续运行，向 Java 端报告错误
-  console.error('[bridge] Failed to import @anthropic-ai/claude-code:', e.message);
+} catch (error) {
+  sdkImportError = error.message;
+  // SDK 不可用时仍继续运行，向 Java 端报告可诊断的状态。
+  console.error(`[bridge] Failed to import ${SDK_PACKAGE}:`, sdkImportError);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -104,8 +136,9 @@ async function handlePrewarm(msg) {
   try {
     // 确保 SDK 已加载（顶层 await 可能已加载，但也可能因错误而未加载）
     if (!claudeSDK) {
-      claudeSDK = await import('@anthropic-ai/claude-code');
+      claudeSDK = await loadClaudeSdk();
       sdkVersion = claudeSDK.default?.version || claudeSDK.version || 'unknown';
+      sdkImportError = null;
     }
 
     // 获取查询函数以验证 API 可用
@@ -160,8 +193,9 @@ async function handleQuery(msg) {
   // 如果 SDK 不可用，立即返回错误
   if (!claudeSDK) {
     sendError(
-      'Claude Code SDK (@anthropic-ai/claude-code) is not installed. ' +
-      'Please run: npm install -g @anthropic-ai/claude-code',
+      `Claude Agent SDK (${SDK_PACKAGE}) is not available. ` +
+      'Reinstall Claude Code SDK from Settings > SDK dependency management.' +
+      (sdkImportError ? ` Import error: ${sdkImportError}` : ''),
       'SDK_NOT_FOUND'
     );
     return;
@@ -396,6 +430,12 @@ respond({
   type: 'ready',
   version: sdkVersion,
   sdkAvailable: claudeSDK !== null,
+  sdkPackage: SDK_PACKAGE,
+  importError: sdkImportError,
+  hint: claudeSDK === null
+    ? 'Reinstall Claude Code SDK from Settings > SDK dependency management.'
+    : undefined,
+  runtime: `node ${process.version} on ${process.platform}`,
 });
 
 rl.on('line', async (line) => {

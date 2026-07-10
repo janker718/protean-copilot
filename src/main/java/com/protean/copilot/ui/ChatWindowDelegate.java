@@ -12,6 +12,7 @@ import com.protean.copilot.handler.PermissionHandler;
 import com.protean.copilot.handler.SettingsHandler;
 import com.protean.copilot.handler.WindowEventHandler;
 import com.protean.copilot.handler.provider.ProviderHandler;
+import com.protean.copilot.i18n.ProteanCopilotBundle;
 import com.protean.copilot.permission.PermissionService;
 import com.protean.copilot.session.ChatSession;
 import com.protean.copilot.session.SessionLifecycleManager;
@@ -25,10 +26,15 @@ import com.google.gson.JsonParser;
 import com.google.gson.JsonArray;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.ui.content.Content;
 import com.intellij.ui.jcef.JBCefBrowser;
+import com.intellij.util.concurrency.AppExecutorUtil;
 
 import javax.swing.*;
 import java.util.*;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 编排处理器注册、权限设置、标签页状态和 QuickFix 操作。
@@ -39,6 +45,7 @@ import java.util.*;
 public class ChatWindowDelegate {
 
     private static final Logger LOG = Logger.getInstance(ChatWindowDelegate.class);
+    private static final int STATUS_RESET_DELAY_SECONDS = 5;
 
     /**
      * 标签页回答状态枚举 —— 映射前端状态。
@@ -71,6 +78,9 @@ public class ChatWindowDelegate {
         boolean isFrontendReady();
         void callJavaScript(String functionName, String... args);
         void executeJavaScriptCode(String jsCode);
+        Content getParentContent();
+        String getOriginalTabName();
+        void setOriginalTabName(String name);
         int getTabIndex();
         void persistTabSessionState();
         void addCodeSnippetFromExternal(String selectionInfo);
@@ -85,6 +95,8 @@ public class ChatWindowDelegate {
     private volatile MessageDispatcher messageDispatcher = null;
     private volatile PermissionHandler permissionHandler = null;
     private volatile HistoryHandler historyHandler = null;
+    private TabAnswerStatus currentTabStatus = TabAnswerStatus.IDLE;
+    private ScheduledFuture<?> statusResetTask;
 
     public ChatWindowDelegate(DelegateHost host) {
         this.host = host;
@@ -353,14 +365,57 @@ public class ChatWindowDelegate {
     }
 
     /**
-     * 更新标签页状态显示名称。
+     * 更新 IDE 工具窗口标签状态显示名称。
+     *
+     * <p>标签标题属于 IntelliJ Content，而不是 WebView。此前调用不存在的
+     * {@code window.setTabStatus}，会在每次状态同步时产生前端 TypeError。</p>
      */
     public void updateTabStatus(TabAnswerStatus status) {
-        try {
-            host.callJavaScript("setTabStatus", status.name());
-        } catch (Exception e) {
-            LOG.warn("Failed to update tab status: " + e.getMessage());
+        Content parentContent = host.getParentContent();
+        String originalTabName = host.getOriginalTabName();
+        if (parentContent == null || originalTabName == null) {
+            LOG.debug("[TabStatus] Skipping update because tab metadata is unavailable");
+            return;
         }
+
+        if (status == currentTabStatus) {
+            return;
+        }
+        currentTabStatus = status;
+
+        if (statusResetTask != null && !statusResetTask.isDone()) {
+            statusResetTask.cancel(false);
+            statusResetTask = null;
+        }
+
+        ApplicationManager.getApplication().invokeLater(() -> {
+            String tabName = originalTabName;
+            String currentDisplayName = parentContent.getDisplayName();
+            if (currentDisplayName != null && !currentDisplayName.startsWith(tabName)) {
+                tabName = currentDisplayName.endsWith("...")
+                    ? currentDisplayName.substring(0, currentDisplayName.length() - 3)
+                    : currentDisplayName;
+                host.setOriginalTabName(tabName);
+            }
+
+            String displayName;
+            switch (status) {
+                case ANSWERING -> displayName = tabName + "...";
+                case COMPLETED -> {
+                    displayName = tabName + " (" + ProteanCopilotBundle.message("tab.status.completed") + ")";
+                    statusResetTask = AppExecutorUtil.getAppScheduledExecutorService().schedule(
+                        () -> ApplicationManager.getApplication().invokeLater(
+                            () -> updateTabStatus(TabAnswerStatus.IDLE)
+                        ),
+                        STATUS_RESET_DELAY_SECONDS,
+                        TimeUnit.SECONDS
+                    );
+                }
+                case IDLE -> displayName = tabName;
+                default -> displayName = tabName;
+            }
+            parentContent.setDisplayName(displayName);
+        });
     }
 
     private void onTabStatusChanged(String status) {

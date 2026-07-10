@@ -32,6 +32,12 @@
     </extensions>
 
     <actions>
+        <action
+            id="ProteanCopilot.OpenToolWindow"
+            class="com.protean.copilot.actions.OpenToolWindowAction"
+            text="Open Protean Copilot"
+            description="Open the Protean Copilot tool window" />
+
         <group
             id="ProteanCopilot.Menu"
             text="Protean Copilot"
@@ -45,11 +51,5 @@
             <separator />
             <reference ref="ProteanCopilot.OpenToolWindow" />
         </group>
-
-        <action
-            id="ProteanCopilot.OpenToolWindow"
-            class="com.protean.copilot.actions.OpenToolWindowAction"
-            text="Open Protean Copilot"
-            description="Open the Protean Copilot tool window" />
     </actions>
 </idea-plugin>

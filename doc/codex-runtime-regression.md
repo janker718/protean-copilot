@@ -34,11 +34,24 @@
   compileJava
 ```
 
+本轮追加执行：
+
+```bash
+./gradlew test \
+  --tests com.protean.copilot.provider.common.BaseSDKBridgeTest \
+  --tests com.protean.copilot.provider.codex.CodexSDKBridgeTest \
+  --tests com.protean.copilot.session.SessionMessageOrchestratorTest \
+  --tests com.protean.copilot.session.SessionSendServiceTest \
+  --tests com.protean.copilot.session.SessionRuntimeMessagesTest
+./gradlew test
+```
+
 结果：
 
 - `compileJava` 通过
 - 上述 Java 定向测试通过
 - Gradle 过程同步完成 WebView 构建与 `protean-chat.html` 产物刷新
+- 全量 `./gradlew test` 最近一次通过
 
 ### WebView 定向回归
 
@@ -56,10 +69,16 @@ cd webview && npx vitest run \
   src/utils/errorMatcher.test.ts
 ```
 
+本轮追加执行：
+
+```bash
+cd webview && npm test
+```
+
 结果：
 
-- `8` 个测试文件通过
-- `103` 个测试通过
+- 原有 `8` 个定向测试文件、`103` 个用例通过
+- 全量 WebView 回归：`84` 个测试文件、`689` 个用例通过，并完成测试 TypeScript 编译检查
 
 ---
 
@@ -76,12 +95,20 @@ cd webview && npx vitest run \
   - `reasoningEffort`
   - `workingDirectory`
 - `resume` 会携带：
+  - 恢复请求选择的 `permissionMode`
   - `sandboxMode`
   - `approvalPolicy`
   - `workingDirectory`
 - `resume` 不再错误携带 `reasoningEffort`
 
-这证明当前通用 bridge 扩展点已经能稳定承接 Codex provider 特定参数。
+新增恢复链路验证：
+
+- history replay 成功会将 session 标记为 provider runtime resume
+- 下一次 Codex 发送经 `SessionSendService` 走 `resumeSession`，成功后才清除标记；失败会保留标记供重试
+- `plan` 恢复为 `read-only/untrusted`，`acceptEdits` 恢复为 `workspace-write/on-request`
+- Base bridge 的四参数 `resumeSession` 已有回归，确保 permission mode 穿透到 provider message builder
+
+这证明当前通用 bridge 扩展点能够稳定承接 Codex provider 特定参数，且 history 回放后的下一轮对话不会静默新建 thread。
 
 ### Session 恢复失败口径
 
@@ -93,6 +120,8 @@ cd webview && npx vitest run \
 - `sandbox denied`
 
 这些错误现在会被归一到统一用户文案，而不是在窗口层、history 注入层、bridge 层各自拼接不同字符串。
+
+`BaseSDKBridge` 的 provider error 会同时推送 `addErrorMessage` 与相同文本的 `updateStatus`；`SessionLifecycleManager` 的 history resume failure 还会显式发送 `showLoading(false)`。这保证 provider 抛错、permission 拒绝与 resume 失败都有一致的可见错误、状态栏文本和 loading 终态。
 
 ### 前端错误识别与恢复提示
 
@@ -145,27 +174,24 @@ cd webview && npx vitest run \
 - 当前构建产物可启动 IntelliJ sandbox
 - 本轮未看到新的启动级 Java/Gradle 报错
 
-### 尚未形成“手工点击完成”证据
+### 待执行的真实账号态手工矩阵
 
 当前环境下，`runIde` 成功只能证明：
 
 - 插件沙箱可启动
 - 当前打包产物没有在 IDE 启动阶段直接炸掉
 
-但它还不能单独证明以下事项已经人工点选验证完成：
+请在 IDE sandbox 中按下表逐项执行，并把实际 thread id、日志文件和截图或录屏地址填入本表。当前没有真实 Codex 凭据与交互证据，以下项目状态均为“待人工执行”。
 
-- `query`
-- `resume`
-- `interrupt`
-- `approval`
-- `sandbox`
-- `timeout`
-- `failure`
-
-原因：
-
-- 本轮环境里没有留出可复核的 IDE 交互截图、录屏或逐步操作日志
-- `runIde` 返回成功后，也没有产生新的交互级 sandbox log 证据来证明这些场景被逐项点击过
+| 场景 | 操作与预期 | 必留证据 | 状态 |
+|---|---|---|---|
+| query | 新建 Codex 会话，发送普通问题；生成 response 与 thread id | IDE log、thread id、截图 | 待人工执行 |
+| resume | 从 history 打开该 thread，继续发送；应沿用同一 thread | history id、`resume` 日志、截图 | 待人工执行 |
+| interrupt | 流式输出期间点击停止；loading 结束且可再次发送 | interrupt 日志、截图 | 待人工执行 |
+| approval | `acceptEdits` 触发写操作；允许与拒绝各一次 | dialog 截图、permission decision 日志 | 待人工执行 |
+| sandbox | `plan` 触发写操作应拒绝；`acceptEdits` 应走 workspace-write | sandbox/approval 参数日志、结果截图 | 待人工执行 |
+| timeout | 断网或 mock 延迟超过 dialog/SDK timeout；UI 应解除 loading 并可重试 | timeout 日志、截图 | 待人工执行 |
+| failure | 使用无效 thread 或模拟 provider error；显示归一化错误并可重试 | error code/phase、状态栏截图 | 待人工执行 |
 
 因此，这一项当前状态只能记为：
 
@@ -181,6 +207,7 @@ cd webview && npx vitest run \
 - bridge `query/resume` 参数构造正确
 - sessionId / threadId remap 逻辑已进入 Java bridge 与 orchestrator
 - resume 失败时的 Java -> WebView 用户可感知链路已统一
+- history replay -> runtime resume -> permission/sandbox 参数构造已被自动化测试串联验证
 
 ### 仍待补齐
 

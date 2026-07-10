@@ -6,6 +6,8 @@ import com.protean.copilot.settings.CodemossSettingsService;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.nio.file.Path;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 public class CodexSDKBridge extends BaseSDKBridge {
@@ -33,6 +35,14 @@ public class CodexSDKBridge extends BaseSDKBridge {
     @Override
     protected String getBridgeScriptResource() {
         return "bridge/codex-sdk-bridge.mjs";
+    }
+
+    @Override
+    protected Map<String, String> getBridgeEnvironment() {
+        Path managedNodeModules = Path.of(
+            System.getProperty("user.home"), ".codemoss", "dependencies", "codex-sdk", "node_modules"
+        );
+        return Map.of("PROTEAN_CODEX_SDK_NODE_MODULES", managedNodeModules.toString());
     }
 
     @Override
@@ -79,9 +89,9 @@ public class CodexSDKBridge extends BaseSDKBridge {
     }
 
     @Override
-    protected JsonObject buildResumeMessage(String sessionId, String prompt, String cwd) {
+    protected JsonObject buildResumeMessage(String sessionId, String prompt, String cwd, String permissionMode) {
         JsonObject message = super.buildResumeMessage(sessionId, prompt, cwd);
-        enrichProviderOptions(message, cwd, "default", false);
+        enrichProviderOptions(message, cwd, permissionMode, false);
         return message;
     }
 

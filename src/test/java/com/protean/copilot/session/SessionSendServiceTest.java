@@ -7,8 +7,8 @@ import static org.junit.Assert.assertEquals;
 public class SessionSendServiceTest {
 
     @Test
-    public void downgradesCodexPlanModeToDefault() {
-        assertEquals("default", SessionSendService.resolveEffectivePermissionMode("codex", "plan", null));
+    public void keepsCodexPlanModeForReadOnlySandboxRuns() {
+        assertEquals("plan", SessionSendService.resolveEffectivePermissionMode("codex", "plan", null));
     }
 
     @Test

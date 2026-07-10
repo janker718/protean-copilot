@@ -196,6 +196,17 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
 
   window.onStreamStart = (mode?: string | boolean) => {
     if (window.__sessionTransitioning) return;
+
+    // A send may optimistically start the UI before the provider emits its
+    // authoritative stream_start event. Both events represent the same turn;
+    // creating another placeholder here makes subsequent deltas target a blank
+    // second assistant message and hides the response from the active turn.
+    if (isStreamingRef.current) {
+      window.__lastStreamActivityAt = Date.now();
+      startStallWatchdog();
+      return;
+    }
+
     const isReplayStart = mode === 'replay' || mode === true;
     // Clear any stale pending updateMessages from previous turn.
     // This prevents onStreamEnd from using outdated snapshot data.

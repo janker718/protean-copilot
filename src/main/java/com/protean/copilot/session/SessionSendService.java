@@ -110,7 +110,6 @@ public class SessionSendService {
         SessionCallbackAdapter callback = session.getCallback();
         if (callback != null) {
             callback.onSessionIdReceived(session.getSessionId());
-            callback.onStreamStart();
         }
     }
 
@@ -153,9 +152,6 @@ public class SessionSendService {
             resolvedMode = "default";
         }
 
-        if ("codex".equals(provider) && "plan".equals(resolvedMode)) {
-            return "default";
-        }
         return resolvedMode;
     }
 
@@ -170,6 +166,17 @@ public class SessionSendService {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Claude SDK bridge is not running")
             );
+        }
+
+        if (session.requiresProviderResume()) {
+            LOG.info("[SessionSend] resuming Codex thread=" + session.getSessionId()
+                + ", permissionMode=" + effectivePermissionMode);
+            return bridge.resumeSession(
+                session.getSessionId(),
+                input != null ? input : "",
+                session.getCwd(),
+                effectivePermissionMode
+            ).thenRun(session::clearProviderResumeRequired);
         }
 
         return bridge.query(

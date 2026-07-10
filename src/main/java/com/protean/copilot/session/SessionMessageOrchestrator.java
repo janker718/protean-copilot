@@ -61,6 +61,7 @@ public class SessionMessageOrchestrator {
             session.replaceMessages(parsedMessages);
             ensureSummary(parsedMessages);
             pushMessagesToFrontend(parsedMessages);
+            session.markProviderResumeRequired();
         }).whenComplete((v, ex) -> {
             session.setLoading(false);
             session.setError(ex == null ? null : SessionRuntimeMessages.historyResumeFailed(

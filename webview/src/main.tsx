@@ -578,6 +578,18 @@ if (typeof window !== 'undefined' && !window.setSessionId) {
   };
 }
 
+// Keep older bridge payloads safe while the React callback registry is loading.
+if (typeof window !== 'undefined' && !window.updateSessionId) {
+  debugLog('[Main] Pre-registering updateSessionId compatibility alias');
+  window.updateSessionId = (sessionId: string) => {
+    if (window.setSessionId) {
+      window.setSessionId(sessionId);
+    } else {
+      window.__pendingSessionId = sessionId;
+    }
+  };
+}
+
 // Pre-register updateDependencyStatus to handle backend status responses that arrive before React initializes
 if (typeof window !== 'undefined' && !window.updateDependencyStatus) {
   debugLog('[Main] Pre-registering updateDependencyStatus placeholder');

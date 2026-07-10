@@ -4,10 +4,12 @@ import com.google.gson.JsonObject;
 import com.protean.copilot.bridge.NodeDetector;
 import com.protean.copilot.provider.common.BaseSDKBridge;
 
+import java.nio.file.Path;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Claude SDK 桥接 —— 对接 npm {@code @anthropic-ai/claude-code} 的具体实现。
+ * Claude SDK 桥接 —— 对接 npm {@code @anthropic-ai/claude-agent-sdk} 的具体实现。
  *
  * <p>继承自 {@link BaseSDKBridge}，复用所有通用的进程管理、JSON-line 协议、
  * 会话生命周期和流式事件处理逻辑。本类提供 Claude 特有的公共 API：
@@ -51,6 +53,14 @@ public class ClaudeSDKBridge extends BaseSDKBridge {
     @Override
     protected String getBridgeScriptResource() {
         return "bridge/claude-sdk-bridge.mjs";
+    }
+
+    @Override
+    protected Map<String, String> getBridgeEnvironment() {
+        Path managedNodeModules = Path.of(
+            System.getProperty("user.home"), ".codemoss", "dependencies", "claude-sdk", "node_modules"
+        );
+        return Map.of("PROTEAN_CLAUDE_SDK_NODE_MODULES", managedNodeModules.toString());
     }
 
     // ==================== Daemon 便捷方法 ====================
@@ -178,12 +188,11 @@ public class ClaudeSDKBridge extends BaseSDKBridge {
             && message.get("sdkAvailable").getAsBoolean();
 
         if (sdkAvailable) {
-            log().info("✓ Claude Code SDK 就绪: version=" + version
+            log().info("✓ Claude Agent SDK 就绪: version=" + version
                 + ", model=" + getDefaultModel());
         } else {
-            log().warn("⚠ Claude Code SDK 未安装或不可用！");
-            log().warn("  请运行: npm install -g @anthropic-ai/claude-code");
-            log().warn("  或确保 NODE_PATH 包含该包的安装位置");
+            log().warn("⚠ Claude Agent SDK 未安装或不可用！");
+            log().warn("  请在 Settings 的 SDK 依赖管理中重新安装 Claude Code SDK");
         }
     }
 

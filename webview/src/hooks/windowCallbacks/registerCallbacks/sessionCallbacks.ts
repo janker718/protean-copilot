@@ -57,6 +57,11 @@ export function registerSessionAndSdkCallbacks(
     }
   };
 
+  // Compatibility for bridge versions that predate the setSessionId name.
+  window.updateSessionId = (sessionId: string) => {
+    window.setSessionId?.(sessionId);
+  };
+
   window.addToast = (message, type) => {
     addToast(message, type as 'info' | 'success' | 'warning' | 'error' | undefined);
   };

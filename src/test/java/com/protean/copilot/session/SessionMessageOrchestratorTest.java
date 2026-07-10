@@ -40,6 +40,21 @@ public class SessionMessageOrchestratorTest {
         assertTrue(session.getMessages().isEmpty());
     }
 
+    @Test
+    public void successfulCodexHistoryLoadMarksSessionForRuntimeResume() throws Exception {
+        ChatSession session = createSession("codex", "thread-1", "/workspace");
+        SessionMessageOrchestrator orchestrator = new SessionMessageOrchestrator(
+            session,
+            new MessageParser(),
+            (provider, sessionId, cwd) -> List.of(),
+            () -> null
+        );
+
+        orchestrator.loadFromServer().join();
+
+        assertTrue(session.requiresProviderResume());
+    }
+
     private static ChatSession createSession(String provider, String sessionId, String cwd) throws Exception {
         ChatSession session = (ChatSession) getUnsafe().allocateInstance(ChatSession.class);
         setField(session, "messages", new ArrayList<ChatSession.Message>());

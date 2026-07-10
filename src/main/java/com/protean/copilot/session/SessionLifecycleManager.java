@@ -138,8 +138,10 @@ public class SessionLifecycleManager {
                 ApplicationManager.getApplication().invokeLater(() -> {
                     host.callJavaScript("historyLoadComplete");
                     if (ex != null) {
-                        host.callJavaScript("addErrorMessage",
-                            SessionRuntimeMessages.historyResumeFailed(newSession.getProvider(), ex));
+                        String message = SessionRuntimeMessages.historyResumeFailed(newSession.getProvider(), ex);
+                        host.callJavaScript("addErrorMessage", message);
+                        host.callJavaScript("updateStatus", message);
+                        host.callJavaScript("showLoading", "false");
                     }
                 });
             });
@@ -147,8 +149,10 @@ public class SessionLifecycleManager {
             LOG.error("Failed to load history session: " + ex.getMessage(), ex);
             ApplicationManager.getApplication().invokeLater(() -> {
                 host.callJavaScript("historyLoadComplete");
-                host.callJavaScript("addErrorMessage",
-                    SessionRuntimeMessages.historyResumeFailed(request.provider(), ex));
+                String message = SessionRuntimeMessages.historyResumeFailed(request.provider(), ex);
+                host.callJavaScript("addErrorMessage", message);
+                host.callJavaScript("updateStatus", message);
+                host.callJavaScript("showLoading", "false");
             });
             return null;
         });

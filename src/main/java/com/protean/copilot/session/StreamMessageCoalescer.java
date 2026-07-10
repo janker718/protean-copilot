@@ -5,7 +5,6 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.util.Alarm;
 import com.protean.copilot.handler.core.HandlerContext;
-import com.protean.copilot.util.JsUtils;
 
 import java.util.function.LongConsumer;
 
@@ -166,18 +165,20 @@ public class StreamMessageCoalescer {
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             final int payloadChars;
             final long buildMs;
-            final String escapedJson;
+            final String callbackPayload;
             try {
                 long start = System.nanoTime();
                 payloadChars = messagesJson.length();
-                escapedJson = JsUtils.escapeJs(messagesJson);
+                // callJavaScript owns JavaScript string escaping at the JCEF boundary.
+                // Escaping here as well makes JSON.parse receive {\\"...} instead of JSON.
+                callbackPayload = prepareCallbackPayload(messagesJson);
                 buildMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
                 lastPayloadChars = payloadChars;
                 if (payloadChars >= LARGE_UPDATE_PAYLOAD_CHARS || buildMs >= SLOW_PAYLOAD_BUILD_MS) {
                     LOG.info("[WebviewTransport] chars=" + payloadChars + ", buildMs=" + buildMs + ", seq=" + sequence);
                 }
             } catch (Exception e) {
-                LOG.warn("Failed to escape JSON: " + e.getMessage());
+                LOG.warn("Failed to prepare message JSON: " + e.getMessage());
                 if (afterSendOnEdt != null) {
                     final long s = sequence;
                     ApplicationManager.getApplication().invokeLater(() -> afterSendOnEdt.accept(s));
@@ -196,13 +197,21 @@ public class StreamMessageCoalescer {
                     }
                 }
                 try {
-                    callbackTarget.callJavaScript("updateMessages", escapedJson, String.valueOf(sequence));
+                    callbackTarget.callJavaScript("updateMessages", callbackPayload, String.valueOf(sequence));
                 } catch (Exception e) {
-                    LOG.warn("Failed to push updateMessages (chars=" + escapedJson.length() + "): " + e.getMessage());
+                    LOG.warn("Failed to push updateMessages (chars=" + callbackPayload.length() + "): " + e.getMessage());
                 }
                 if (afterSendOnEdt != null) afterSendOnEdt.accept(sequence);
             });
         });
+    }
+
+    /**
+     * Returns the JSON snapshot unchanged. The callback target performs the single required
+     * JavaScript-string escaping immediately before executing code in JCEF.
+     */
+    static String prepareCallbackPayload(String messagesJson) {
+        return messagesJson;
     }
 
     // ---- 流式心跳 ----

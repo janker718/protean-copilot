@@ -65,6 +65,16 @@ public abstract class BaseSDKBridge {
      */
     protected abstract String getBridgeScriptResource();
 
+    /**
+     * 返回传递给 Node.js bridge 的 provider 专属环境变量。
+     *
+     * <p>bridge 脚本从临时目录运行，不能依赖当前工作目录或 {@code NODE_PATH}
+     * 来解析 ESM 包。Provider 应通过此扩展点传递其受管 SDK 的准确位置。</p>
+     */
+    protected Map<String, String> getBridgeEnvironment() {
+        return Map.of();
+    }
+
     // ==================== 日志 & JSON ====================
 
     /** 日志记录器（子类可通过 {@link #log()} 访问） */
@@ -239,7 +249,15 @@ public abstract class BaseSDKBridge {
         ProcessBuilder pb = new ProcessBuilder(nodePath, scriptPath);
         pb.environment().put("NODE_ENV", "production");
 
-        // 设置 NODE_PATH 以便 Node.js 能找到 @anthropic-ai/claude-code
+        for (Map.Entry<String, String> entry : getBridgeEnvironment().entrySet()) {
+            if (entry.getKey() != null && !entry.getKey().isBlank()
+                && entry.getValue() != null && !entry.getValue().isBlank()) {
+                pb.environment().put(entry.getKey(), entry.getValue());
+                LOG.info("  " + entry.getKey() + ": " + entry.getValue());
+            }
+        }
+
+        // 保留 NODE_PATH 以兼容依赖该机制的旧 bridge。
         String nodePathEnv = resolveNodePath(scriptPath);
         if (nodePathEnv != null && !nodePathEnv.isEmpty()) {
             pb.environment().put("NODE_PATH", nodePathEnv);
@@ -496,6 +514,14 @@ public abstract class BaseSDKBridge {
      * 恢复一个已存在的会话，发送后续消息。
      */
     public CompletableFuture<Void> resumeSession(String sessionId, String prompt, String cwd) {
+        return resumeSession(sessionId, prompt, cwd, "default");
+    }
+
+    /**
+     * 恢复已有会话，同时保留调用方选择的运行期权限模式。
+     * 未使用该参数的 provider 仍可沿用三参数消息构造方法。
+     */
+    public CompletableFuture<Void> resumeSession(String sessionId, String prompt, String cwd, String permissionMode) {
         if (!isRunning()) {
             CompletableFuture<Void> failed = new CompletableFuture<>();
             failed.completeExceptionally(new IllegalStateException(
@@ -514,7 +540,7 @@ public abstract class BaseSDKBridge {
         state.responseFuture = future;
         state.streaming = true;
 
-        JsonObject msg = buildResumeMessage(sessionId, prompt, cwd);
+        JsonObject msg = buildResumeMessage(sessionId, prompt, cwd, permissionMode);
 
         try {
             writeMessage(msg);
@@ -799,6 +825,7 @@ public abstract class BaseSDKBridge {
             + (details != null ? ", details=" + details : ""));
 
         invokeJsCallback("addErrorMessage", uiMessage);
+        invokeJsCallback("updateStatus", uiMessage);
         if (recoverable) {
             invokeJsCallback("updateStatus", SessionRuntimeMessages.runtimeRecovered(getProviderName()));
         }
@@ -933,7 +960,9 @@ public abstract class BaseSDKBridge {
     // ==================== 内部：NODE_PATH 解析 ====================
 
     /**
-     * 解析 NODE_PATH 以定位 {@code @anthropic-ai/claude-code} 包。
+     * 解析 NODE_PATH 以兼容 CommonJS 和旧版全局安装布局。
+     * Provider 的 ESM SDK 应通过 {@link #getBridgeEnvironment()} 传递明确路径，
+     * 因为 Node.js ESM 不会可靠地使用 NODE_PATH。
      * 尝试以下路径（按优先级）：
      * <ol>
      *   <li>全局 npm node_modules（{@code npm root -g}）</li>
@@ -1069,6 +1098,10 @@ public abstract class BaseSDKBridge {
         msg.addProperty("prompt", prompt);
         msg.addProperty("cwd", cwd);
         return msg;
+    }
+
+    protected JsonObject buildResumeMessage(String sessionId, String prompt, String cwd, String permissionMode) {
+        return buildResumeMessage(sessionId, prompt, cwd);
     }
 
     protected JsonObject buildPrewarmMessage(String cwd, String model, String permissionMode) {

@@ -517,8 +517,13 @@ final class ProjectConfigHandler {
     }
 
     private void pushJson(String callback, JsonObject payload) {
-        ApplicationManager.getApplication().invokeLater(() ->
-            context.callJavaScript(callback, context.escapeJs(payload.toString())));
+        pushJson(context, callback, payload);
+    }
+
+    static void pushJson(HandlerContext context, String callback, JsonObject payload) {
+        // callJavaScript owns EDT dispatch and JavaScript string escaping. Escaping here
+        // would turn the JSON argument into an escaped literal that JSON.parse cannot read.
+        context.callJavaScript(callback, payload.toString());
     }
 
     private void showError(String message) {

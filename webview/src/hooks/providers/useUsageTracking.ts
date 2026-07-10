@@ -28,7 +28,7 @@ export function useUsageTracking() {
     if (sdkStatusLoaded) return undefined;
 
     const timeoutId = window.setTimeout(() => {
-      console.warn('[Frontend] SDK status load timed out; falling back to unloaded state');
+      console.warn('[Frontend] SDK status load timed out; allowing the provider runtime to determine availability');
       setSdkStatusLoaded(true);
     }, SDK_STATUS_LOAD_TIMEOUT_MS);
 
@@ -40,6 +40,12 @@ export function useUsageTracking() {
       if (!sdkStatusLoaded) return false;
       const sdkId = PROVIDER_TO_SDK[providerId] || 'claude-sdk';
       const status = sdkStatus[sdkId];
+
+      // A missing status is an unavailable status check, not evidence that the
+      // SDK is absent. Let the provider bridge report the concrete runtime
+      // error instead of blocking a working managed SDK after the timeout.
+      if (!status) return true;
+
       return status?.status === 'installed' || status?.installed === true;
     },
     [sdkStatusLoaded, sdkStatus],

@@ -107,7 +107,7 @@ public class SessionCallbackAdapter {
     public void onSessionIdReceived(String sessionId) {
         if (!active) return;
         try {
-            jsTarget.callJavaScript("updateSessionId", sessionId);
+            jsTarget.callJavaScript("setSessionId", sessionId);
         } catch (Exception e) {
             LOG.warn("Failed to send session ID to frontend: " + e.getMessage());
         }
@@ -168,10 +168,15 @@ public class SessionCallbackAdapter {
     public void onStreamEnd() {
         if (!active) return;
         try {
-            jsTarget.callJavaScript("onStreamEnd");
-            jsTarget.callJavaScript("showLoading", "false");
             streamCoalescer.onStreamEnd();
-            onStreamEnded.run();
+            // The final message snapshot is authoritative. Flush it before ending
+            // the frontend turn so the next prompt cannot race a stale snapshot.
+            streamCoalescer.flush(sequence -> {
+                if (!active) return;
+                jsTarget.callJavaScript("onStreamEnd", String.valueOf(sequence));
+                jsTarget.callJavaScript("showLoading", "false");
+                onStreamEnded.run();
+            });
         } catch (Exception e) {
             LOG.warn("流结束通知失败: " + e.getMessage());
         }

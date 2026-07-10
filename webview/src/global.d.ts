@@ -114,6 +114,11 @@ interface Window {
   setSessionId?: (sessionId: string) => void;
 
   /**
+   * Compatibility alias for older bridges that used updateSessionId.
+   */
+  updateSessionId?: (sessionId: string, previousSessionId?: string) => void;
+
+  /**
    * Add toast notification (called from backend)
    */
   addToast?: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void;

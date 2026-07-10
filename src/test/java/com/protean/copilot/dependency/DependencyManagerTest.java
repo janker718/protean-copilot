@@ -19,4 +19,10 @@ public class DependencyManagerTest {
         assertEquals("0.143.0", SdkDefinition.CODEX_SDK.getRequestedVersion(null));
         assertEquals("@openai/codex-sdk@0.143.0", SdkDefinition.CODEX_SDK.getAllPackages(null).get(0));
     }
+
+    @Test
+    public void claudeDefinitionUsesTheAgentSdkConsumedByTheRuntimeBridge() {
+        assertEquals("@anthropic-ai/claude-agent-sdk", SdkDefinition.CLAUDE_SDK.getNpmPackage());
+        assertEquals("0.2.58", SdkDefinition.CLAUDE_SDK.getLockedVersion());
+    }
 }

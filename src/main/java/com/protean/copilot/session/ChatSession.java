@@ -84,6 +84,8 @@ public class ChatSession {
     private volatile String model = "default";
     private volatile String provider;
     private volatile String reasoningEffort;
+    /** True after history replay succeeds and the next Codex turn must resume the provider thread. */
+    private volatile boolean providerResumeRequired;
     private volatile List<String> slashCommands = new ArrayList<>();
 
     private volatile SessionCallbackAdapter callback;
@@ -183,6 +185,18 @@ public class ChatSession {
 
     public String getRuntimeSessionEpoch() {
         return runtimeSessionEpoch;
+    }
+
+    public boolean requiresProviderResume() {
+        return providerResumeRequired;
+    }
+
+    public void markProviderResumeRequired() {
+        providerResumeRequired = true;
+    }
+
+    public void clearProviderResumeRequired() {
+        providerResumeRequired = false;
     }
 
     public List<String> getSlashCommands() {

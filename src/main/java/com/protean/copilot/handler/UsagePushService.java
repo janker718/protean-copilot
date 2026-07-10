@@ -1,7 +1,6 @@
 package com.protean.copilot.handler;
 
 import com.google.gson.JsonObject;
-import com.intellij.openapi.application.ApplicationManager;
 import com.protean.copilot.handler.core.HandlerContext;
 
 public final class UsagePushService {
@@ -17,8 +16,10 @@ public final class UsagePushService {
         payload.addProperty("percentage", 0);
         payload.addProperty("usedTokens", 0);
         payload.addProperty("maxTokens", maxTokens);
-        ApplicationManager.getApplication().invokeLater(() ->
-            context.callJavaScript("window.onUsageUpdate", context.escapeJs(payload.toString())));
+        // callJavaScript owns JavaScript-string escaping and EDT dispatch. Pre-escaping
+        // here turns JSON into a literal such as {\"percentage\":0}, which the WebView
+        // callback cannot parse.
+        context.callJavaScript("window.onUsageUpdate", payload.toString());
     }
 
     public void refreshContextBar() {

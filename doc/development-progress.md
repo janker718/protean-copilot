@@ -1,6 +1,6 @@
 # 开发进度快照
 
-更新时间：2026-07-10（本轮复核）
+更新时间：2026-07-10（Codex runtime 恢复链路回归后）
 
 本文档基于两个仓库当前代码状态整理：
 
@@ -42,8 +42,8 @@
 
 | 维度 | ProteanCopilot | jetbrains-cc-gui |
 |---|---:|---:|
-| Java 主代码文件数 | 138 | 268 |
-| Java 测试文件数 | 17 | 86 |
+| Java 主代码文件数 | 141 | 268 |
+| Java 测试文件数 | 24 | 86 |
 | WebView `ts/tsx` 文件数 | 402 | - |
 | WebView 测试文件数 | 84 | - |
 | Node/bridge JS 文件数 | 2 个 bridge resource | 77 个 ai-bridge JS/CJS/MJS |
@@ -66,6 +66,11 @@
 - `./gradlew runIde` 已成功返回，可确认当前插件沙箱可启动
 - `cd webview && npx vitest run src/hooks/useWindowCallbacks.test.ts src/hooks/providers/useUsageTracking.test.ts` 已通过
 - `./gradlew compileJava` 已通过
+- `./gradlew test` 已通过；新增的 `StreamMessageCoalescerTest` 覆盖模型消息快照在 Java -> JCEF 边界的 JSON 传输契约
+- `./gradlew test` 最近一次全量通过；`BaseSDKBridgeTest`、`CodexSDKBridgeTest`、`SessionMessageOrchestratorTest`、`SessionSendServiceTest`、`SessionRuntimeMessagesTest` 覆盖本轮 Codex runtime 恢复改动
+- `cd webview && npm test` 最近一次全量通过：`84` 个测试文件、`689` 个用例，并完成测试 TypeScript 编译检查
+- `node --check src/main/resources/bridge/codex-sdk-bridge.mjs` 与 `node --check src/main/resources/bridge/claude-sdk-bridge.mjs` 最近一次均通过
+- `./gradlew runIde` 最近一次成功返回；当前插件 sandbox 可按最新产物启动
 
 本轮额外确认：
 
@@ -73,6 +78,13 @@
 - `DependencySection` 会消费页面初始化前积压的状态、版本与更新事件，并为状态和版本查询提供 `5s` / `8s` 超时兜底。
 - `cd webview && npx vitest run src/components/settings/DependencySection/index.test.tsx` 最近一次已通过（8 个用例），覆盖积压事件与超时兜底。
 - 本地 IDE 曾选中指向 `doc/` 的临时 Gradle 配置，导致尝试执行不存在的 `/gradlew`；该工作区配置已改回共享的项目根 `.run/Run IDE with Plugin` 配置。此项是本机运行入口排障，不属于共享源码功能变更。
+
+本轮最新流式链路复核：
+
+- 模型返回消息时出现的 `SyntaxError: Expected property name or '}' in JSON at position 2` 已定位为 Java 侧双重转义，而非模型响应、SDK 配置或 provider 返回格式问题。
+- [StreamMessageCoalescer.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/StreamMessageCoalescer.java) 曾先转义完整消息 JSON，随后 [ProteanChatWindow.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/ui/toolwindow/ProteanChatWindow.java) 在 JCEF 执行边界再次转义，导致 WebView 收到以 `{\\` 开头的伪 JSON。
+- 现已移除合并器中的预转义，只保留 JCEF 边界的一次字符串转义；[StreamMessageCoalescerTest.java](/Users/janker/Documents/ProteanCopilot/src/test/java/com/protean/copilot/session/StreamMessageCoalescerTest.java) 使用含嵌套对象、引号和换行的消息快照回归验证。
+- 该修复已通过全量 Gradle 测试和 Node 侧等价复现验证；仍需在 IDE 中以真实 Claude/Codex 流式响应完成手工确认。
 
 但需要明确区分：
 
@@ -85,7 +97,7 @@
 
 - IDE 内真实 WebView 手工联调：`query / resume / interrupt / approval / sandbox / timeout / failure` 全场景点击回归
 - 带真实 Codex provider 凭据与 thread 恢复数据的端到端手工验证
-- 更宽的 Java / WebView 全量回归，而不是当前这轮“Codex 主链 + permission/session 恢复关键点”定向回归
+- 真实 IDE 账号态下的 Java / WebView 联动回归；自动化全量测试已经通过，但不能替代真实 provider 的网络、凭据与工具授权行为
 
 因此本文档中的“已完成”表示：
 
@@ -189,6 +201,8 @@ Claude provider 主链已具备：
 - [CodexSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/codex/CodexSDKBridge.java) 已能透传 `thread`、`sandbox`、`approval`、`workingDirectory`、`modelReasoningEffort` 等 provider 特定参数。  
 - [codex-sdk-bridge.mjs](/Users/janker/Documents/ProteanCopilot/src/main/resources/bridge/codex-sdk-bridge.mjs) 已从 stub 补成真实 bridge，具备 `query`、`resume`、`interrupt`、`prewarm`、`shutdown` 主命令以及流式事件回传能力。  
 - `requestSessionId -> 实际 session/thread id` 的 remap 语义已经进入 bridge 与 session 协调链路，不再只是窗口层临时约定。
+- history replay 成功后，[SessionMessageOrchestrator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionMessageOrchestrator.java) 会显式标记下一条 Codex 消息为 runtime `resume`；[SessionSendService.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionSendService.java) 仅在该次恢复成功后清除标记，失败可继续重试。
+- `resume` 现在保留调用方的 `permissionMode`：`plan -> read-only/untrusted`、`acceptEdits -> workspace-write/on-request`，不再固定退回 `default` 组合。
 
 这意味着 Codex 现在更准确的状态已经不是“结构接入中”，而是“运行接入已完成第一轮，正在补稳定化”。
 
@@ -200,6 +214,7 @@ Claude provider 主链已具备：
 - [ChatWindowDelegate.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/ui/ChatWindowDelegate.java) 去掉 Claude-only 可用性判断，改为按 active provider 走通用 SDK 运行判定
 - [SessionLifecycleManager.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionLifecycleManager.java)、[HistoryMessageInjector.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/handler/history/HistoryMessageInjector.java)、[SessionMessageOrchestrator.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/session/SessionMessageOrchestrator.java) 已统一历史恢复失败口径
 - [BaseSDKBridge.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/provider/common/BaseSDKBridge.java) 已统一 `phase/code/hint/sessionId` 日志与恢复状态回传
+- bridge error、history resume error 均同时写入错误消息与状态提示，并在 history failure 时显式释放 loading，避免用户只看到 toast 却仍处于加载态
 - WebView `errorMatcher` 已能识别统一后的 resume / permission / sandbox 错误
 - [ProteanChatWindow.java](/Users/janker/Documents/ProteanCopilot/src/main/java/com/protean/copilot/ui/toolwindow/ProteanChatWindow.java) 已补齐 `event:content` 冒号协议消息分发，`get_dependency_status:` 不再被窗口层静默吞掉
 - [useUsageTracking.ts](/Users/janker/Documents/ProteanCopilot/webview/src/hooks/providers/useUsageTracking.ts) 已增加 SDK 状态初始化超时兜底，避免首页在 dependency/status 回调丢失时永久停留在 `Checking SDK status`
@@ -337,6 +352,7 @@ Claude provider 主链已具备：
 
 - 当前项目 provider 扩展点主要在 Java 侧
 - 参考项目 provider 扩展点同时在 Java 与 Node 侧都已稳定
+- 当前项目已修正 Java -> JCEF 的流式 JSON 单次转义契约，但该类边界约束尚未沉淀为参考项目那样的独立 Node channel/service 传输层
 
 也因此，当前项目的多 Provider 虽然已经起步，但可扩展性还未达到参考项目成熟度。
 
@@ -473,6 +489,7 @@ Claude provider 主链已具备：
 - 增补了 App 级 SDK 状态加载回归测试与超时兜底测试
 - `get_dependency_status` 这条 provider/dependency 启动链路已从“结构存在”推进到“有回归保护”
 - `@openai/codex-sdk` 的实际安装、精确版本锁定、`package-lock.json` 同步与环境说明已完成；剩余的是 IDE 内用户操作和真实凭据的手工验证，不是依赖后端实现缺失。
+- 模型流式消息的 JSON 双重转义已修复并加入 Java 回归测试，消除了 WebView 在模型返回时 `JSON.parse` 失败的一条确定性传输缺陷。
 
 原因：
 
@@ -542,6 +559,7 @@ Claude provider 主链已具备：
 - history / permission / session 的通用层已基本成形
 - Codex 已经从“结构层”推进到“首轮运行层”，但还没完成稳定化收口
 - dependency/backend 已完成真实安装、锁版、lockfile、环境说明和 Settings 数据链路的首轮闭环，但还没完成 IDE 内人工安装/卸载与真实凭据回归
+- 流式消息 JSON 传输已从双重转义的确定性失败修正为单次边界转义，并已有自动化保护；真实 IDE 流式响应仍待手工回归记录
 
 因此当前与参考项目的核心差异，不再是“有没有这些目录”，而是：
 

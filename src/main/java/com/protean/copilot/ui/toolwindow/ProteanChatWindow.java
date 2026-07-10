@@ -506,6 +506,21 @@ public class ProteanChatWindow {
             }
 
             @Override
+            public Content getParentContent() {
+                return parentContent;
+            }
+
+            @Override
+            public String getOriginalTabName() {
+                return originalTabName;
+            }
+
+            @Override
+            public void setOriginalTabName(String name) {
+                ProteanChatWindow.this.setOriginalTabName(name);
+            }
+
+            @Override
             public int getTabIndex() {
                 return ProteanChatWindow.this.getTabIndex();
             }
@@ -549,6 +564,9 @@ public class ProteanChatWindow {
 
     public void setParentContent(Content content) {
         parentContent = content;
+        if (originalTabName == null && content != null) {
+            setOriginalTabName(content.getDisplayName());
+        }
     }
 
     public void setOriginalTabName(String name) {

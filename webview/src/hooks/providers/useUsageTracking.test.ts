@@ -8,7 +8,7 @@ describe('useUsageTracking', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
-  it('falls back to loaded state when sdk status callback never arrives', () => {
+  it('allows the provider runtime to determine availability when status callback never arrives', () => {
     const { result } = renderHook(() => useUsageTracking());
 
     expect(result.current.sdkStatusLoaded).toBe(false);
@@ -18,9 +18,23 @@ describe('useUsageTracking', () => {
     });
 
     expect(result.current.sdkStatusLoaded).toBe(true);
+    expect(result.current.isSdkInstalled('claude')).toBe(true);
     expect(console.warn).toHaveBeenCalledWith(
-      '[Frontend] SDK status load timed out; falling back to unloaded state',
+      '[Frontend] SDK status load timed out; allowing the provider runtime to determine availability',
     );
+  });
+
+  it('still blocks a provider explicitly reported as not installed', () => {
+    const { result } = renderHook(() => useUsageTracking());
+
+    act(() => {
+      result.current.setSdkStatus({
+        'claude-sdk': { status: 'not_installed' },
+      });
+      result.current.setSdkStatusLoaded(true);
+    });
+
+    expect(result.current.isSdkInstalled('claude')).toBe(false);
   });
 
   it('does not trigger timeout fallback after sdk status loads normally', () => {

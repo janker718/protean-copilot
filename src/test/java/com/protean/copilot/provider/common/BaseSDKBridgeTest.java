@@ -104,9 +104,25 @@ public class BaseSDKBridgeTest {
         assertTrue(events.contains(
             "addErrorMessage:Test permission request was denied. approval denied for apply_patch. Retry after requesting approval."
         ));
+        assertTrue(events.contains(
+            "updateStatus:Test permission request was denied. approval denied for apply_patch. Retry after requesting approval."
+        ));
+    }
+
+    @Test
+    public void resumeSessionPassesPermissionModeThroughProviderMessageBuilder() {
+        TestBridge bridge = new TestBridge();
+
+        bridge.resumeSession("thread-1", "continue", "/workspace", "acceptEdits");
+
+        assertNotNull(bridge.lastWrittenMessage);
+        assertEquals("resume", bridge.lastWrittenMessage.get("type").getAsString());
+        assertEquals("acceptEdits", bridge.lastWrittenMessage.get("permissionMode").getAsString());
     }
 
     private static final class TestBridge extends BaseSDKBridge {
+
+        private JsonObject lastWrittenMessage;
 
         @Override
         protected String getProviderName() {
@@ -121,6 +137,23 @@ public class BaseSDKBridgeTest {
         @Override
         protected String getBridgeScriptResource() {
             return "bridge/test.mjs";
+        }
+
+        @Override
+        public boolean isRunning() {
+            return true;
+        }
+
+        @Override
+        protected void writeMessage(JsonObject message) {
+            lastWrittenMessage = message;
+        }
+
+        @Override
+        protected JsonObject buildResumeMessage(String sessionId, String prompt, String cwd, String permissionMode) {
+            JsonObject message = super.buildResumeMessage(sessionId, prompt, cwd, permissionMode);
+            message.addProperty("permissionMode", permissionMode);
+            return message;
         }
 
         void remap(String requestSessionId, String actualSessionId, String cwd) {

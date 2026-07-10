@@ -230,6 +230,22 @@ describe('useWindowCallbacks integration', () => {
     expect(opts.setCurrentSessionId).toHaveBeenCalledWith('new-session-123');
   });
 
+  it('updateSessionId compatibility alias delegates to setSessionId', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+
+    window.__sessionTransitioning = true;
+    window.__sessionTransitionToken = 'transition-legacy';
+
+    act(() => {
+      window.updateSessionId!('legacy-session-123', 'request-session-123');
+    });
+
+    expect(window.__sessionTransitioning).toBe(false);
+    expect(window.__sessionTransitionToken).toBeNull();
+    expect(opts.setCurrentSessionId).toHaveBeenCalledWith('legacy-session-123');
+  });
+
   it('updateDependencyStatus marks sdk status as loaded for app gating', () => {
     const opts = createOptions();
     renderHook(() => useWindowCallbacks(opts));
@@ -846,6 +862,26 @@ describe('useWindowCallbacks integration', () => {
   });
 
   // ===== onStreamEnd idempotency (dual-path delivery) =====
+
+  it('treats duplicate stream-start notifications as one response turn', () => {
+    const buffer = { current: [] as ClaudeMessage[] };
+    const setMessages = vi.fn((value: ClaudeMessage[] | ((prev: ClaudeMessage[]) => ClaudeMessage[])) => {
+      buffer.current = typeof value === 'function'
+        ? (value as (prev: ClaudeMessage[]) => ClaudeMessage[])(buffer.current)
+        : value;
+    });
+    const opts = createOptions({ setMessages });
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.onStreamStart!(); // optimistic backend send path
+      window.onStreamStart!(); // provider stream_start event
+    });
+
+    expect(buffer.current).toHaveLength(1);
+    expect(buffer.current[0]).toMatchObject({ type: 'assistant', isStreaming: true });
+    expect(opts.streamingTurnIdRef.current).toBe(1);
+  });
 
   describe('onStreamEnd idempotency', () => {
     it('second onStreamEnd for same turn is ignored', () => {

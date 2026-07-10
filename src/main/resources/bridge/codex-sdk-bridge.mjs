@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import * as readline from 'node:readline';
+import { readFile } from 'node:fs/promises';
+import { delimiter, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 process.stdout.setDefaultEncoding('utf-8');
 
@@ -55,8 +58,42 @@ function buildReadyPayload() {
     importError: sdkImportError,
     hint: sdkModule
       ? null
-      : 'Install @openai/codex-sdk in webview/ and ensure Node.js >= 18 is used by the IDE runtime.',
+      : 'Install @openai/codex-sdk from Settings and ensure Node.js >= 18 is used by the IDE runtime.',
   };
+}
+
+async function loadCodexSdk() {
+  const failures = [];
+  const configuredRoots = (process.env.PROTEAN_CODEX_SDK_NODE_MODULES || '')
+    .split(delimiter)
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  for (const nodeModulesRoot of configuredRoots) {
+    try {
+      // The bridge runs from a temporary directory, so resolve ESM from the
+      // managed SDK installation instead of relying on the process cwd.
+      const packageRoot = join(nodeModulesRoot, ...sdkPackageName.split('/'));
+      const packageManifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf-8'));
+      const packageExport = packageManifest.exports?.['.'];
+      const entryPoint = typeof packageExport === 'object'
+        ? packageExport.import
+        : packageExport || packageManifest.module || packageManifest.main;
+      if (typeof entryPoint !== 'string' || !entryPoint.startsWith('./')) {
+        throw new Error(`unsupported ESM entry point in ${packageRoot}/package.json`);
+      }
+      return await import(pathToFileURL(join(packageRoot, entryPoint)).href);
+    } catch (error) {
+      failures.push(`${nodeModulesRoot}: ${error.message}`);
+    }
+  }
+
+  try {
+    return await import(sdkPackageName);
+  } catch (error) {
+    failures.push(`default resolution: ${error.message}`);
+    throw new Error(failures.join('; '));
+  }
 }
 
 async function ensureSdkLoaded() {
@@ -64,7 +101,7 @@ async function ensureSdkLoaded() {
     return sdkModule;
   }
   try {
-    sdkModule = await import(sdkPackageName);
+    sdkModule = await loadCodexSdk();
     sdkVersion = sdkModule?.version || sdkModule?.default?.version || 'unknown';
     sdkImportError = null;
     return sdkModule;
